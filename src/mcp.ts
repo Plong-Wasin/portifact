@@ -26,38 +26,52 @@ type TokenVerifier = {
 
 type ToolContext = { authInfo?: AuthInfo; correlationId?: string };
 
-function protocolError(message: string, status = 400) {
+// Spec (2026-07-28) JSON-RPC error codes for transport-level failures.
+const ERR_HEADER_MISMATCH = -32020;
+const ERR_INVALID_REQUEST = -32600;
+const ERR_UNSUPPORTED_VERSION = -32022;
+
+function rpcError(code: number, message: string, status = 400, data?: Record<string, unknown>) {
   return Response.json(
-    { jsonrpc: "2.0", error: { code: -32600, message } },
+    { jsonrpc: "2.0", error: { code, message, ...(data ? { data } : {}) } },
     { status },
   );
 }
 
+// Methods that MUST carry Mcp-Name per 2026-07-28 (params.name / params.uri).
+const METHODS_REQUIRING_NAME = new Set(["tools/call", "resources/read", "prompts/get"]);
+
 async function validateHeaders(request: Request): Promise<Response | undefined> {
-  if (request.headers.get("mcp-protocol-version") !== protocolVersion) {
-    return protocolError(`MCP-Protocol-Version must be ${protocolVersion}`);
+  const headerVersion = request.headers.get("mcp-protocol-version");
+  if (headerVersion !== protocolVersion) {
+    return rpcError(ERR_UNSUPPORTED_VERSION, `Unsupported protocol version: ${headerVersion ?? "(missing)"}`, 400, { supported: [protocolVersion], requested: headerVersion ?? null });
   }
   const method = request.headers.get("mcp-method");
+  if (!method) return rpcError(ERR_HEADER_MISMATCH, "mcp-method header is required");
+  // Mcp-Name is required only for name-bearing methods; tools/list, server/discover, etc. omit it.
   const name = request.headers.get("mcp-name");
-  if (!method) return protocolError("mcp-method is required");
-  if (!name) return protocolError("mcp-name is required");
-  if (request.headers.has("mcp-session-id")) {
-    return protocolError("Mcp-Session-Id is not supported");
+  if (METHODS_REQUIRING_NAME.has(method) && !name) {
+    return rpcError(ERR_HEADER_MISMATCH, `mcp-name header is required for ${method}`);
   }
+  // 2026-07-28 removed Mcp-Session-Id; legacy clients sending it must be ignored, but
+  // rejecting here surfaces the incompatibility clearly for modern-only deployments.
   if (request.method === "POST") {
+    let body: { method?: string; params?: { name?: string }; _meta?: Record<string, unknown> };
     try {
-      const body = await request.clone().json() as {
-        method?: string;
-        params?: { name?: string };
-      };
-      if (body.method && body.method !== method) {
-        return protocolError("mcp-method does not match the JSON-RPC method");
-      }
-      if (body.method === "tools/call" && body.params?.name && body.params.name !== name) {
-        return protocolError("mcp-name does not match the requested tool");
-      }
+      body = await request.clone().json() as typeof body;
     } catch {
-      return protocolError("invalid JSON-RPC body");
+      return rpcError(ERR_INVALID_REQUEST, "invalid JSON-RPC body");
+    }
+    // Header is the mirror; body._meta is the source of truth — they must agree.
+    const metaVersion = body._meta?.["io.modelcontextprotocol/protocolVersion"];
+    if (typeof metaVersion === "string" && metaVersion !== headerVersion) {
+      return rpcError(ERR_HEADER_MISMATCH, "MCP-Protocol-Version header does not match body _meta");
+    }
+    if (body.method && body.method !== method) {
+      return rpcError(ERR_HEADER_MISMATCH, "mcp-method header does not match JSON-RPC method");
+    }
+    if (method === "tools/call" && body.params?.name && name && body.params.name !== name) {
+      return rpcError(ERR_HEADER_MISMATCH, "mcp-name header does not match requested tool");
     }
   }
 }
