@@ -1,0 +1,45 @@
+services:
+  migrate:
+    build: .
+    command: bun run db:migrate
+    env_file: .env
+    restart: "no"
+
+  app:
+    build: .
+    command: bun run start
+    env_file: .env
+    restart: unless-stopped
+    stop_grace_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  worker:
+    build: .
+    command: bun run worker
+    env_file: .env
+    restart: unless-stopped
+    stop_grace_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  nginx:
+    build: ./nginx
+    environment:
+      APP_HOST: ${APP_HOST:?APP_HOST is required — set it to your APP_URL hostname}
+      MAX_ARTIFACT_HTML_BYTES: ${MAX_ARTIFACT_HTML_BYTES:-1048576}
+    restart: unless-stopped
+    stop_grace_period: 10s
+    ports:
+      - "80:80"
+    depends_on:
+      app:
+        condition: service_healthy

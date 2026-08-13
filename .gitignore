@@ -1,0 +1,11 @@
+*.local.*
+.scratch
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+*.log
+.playwright-mcp
+sandbox-01-result.png

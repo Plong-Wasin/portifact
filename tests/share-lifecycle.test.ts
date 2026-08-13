@@ -1,0 +1,75 @@
+import { describe, expect, test } from "bun:test";
+import { config } from "./helpers";
+
+const DSN = Bun.env.TEST_DATABASE_URL;
+
+describe.skipIf(!DSN)("share lifecycle", () => {
+  test("publish then rotate revokes the old token and issues a new one", async () => {
+    const { createDb } = await import("../src/db/client");
+    const { runMigrations } = await import("../src/db/migrate");
+    const { ArtifactService } = await import("../src/artifacts/service");
+
+    const cfg = config({ DATABASE_URL: DSN! });
+    const { db, sql } = createDb(cfg);
+    await runMigrations(cfg);
+    const service = new ArtifactService(db, cfg);
+    const ownerId = crypto.randomUUID();
+    const created = await service.create(ownerId, "doc", "<p>hi</p>");
+    const version = (await service.versions(ownerId, created.artifact.id))[0];
+
+    const pub1 = await service.publish(ownerId, created.artifact.id, version.id);
+    const shared1 = await service.shared(pub1.token);
+    expect(shared1.version.id).toBe(version.id);
+
+    const pub2 = await service.rotate(ownerId, created.artifact.id);
+    expect(pub2.token).not.toBe(pub1.token);
+
+    await expect(service.shared(pub1.token)).rejects.toThrow(); // revoked
+    const shared2 = await service.shared(pub2.token);
+    expect(shared2.version.id).toBe(version.id);
+
+    await service.remove(ownerId, created.artifact.id);
+    await sql.close();
+  });
+
+  test("delete revokes active share link", async () => {
+    const { createDb } = await import("../src/db/client");
+    const { runMigrations } = await import("../src/db/migrate");
+    const { ArtifactService } = await import("../src/artifacts/service");
+
+    const cfg = config({ DATABASE_URL: DSN! });
+    const { db, sql } = createDb(cfg);
+    await runMigrations(cfg);
+    const service = new ArtifactService(db, cfg);
+    const ownerId = crypto.randomUUID();
+    const created = await service.create(ownerId, "doc", "<p>x</p>");
+    const version = (await service.versions(ownerId, created.artifact.id))[0];
+    const pub = await service.publish(ownerId, created.artifact.id, version.id);
+
+    await service.remove(ownerId, created.artifact.id);
+    await expect(service.shared(pub.token)).rejects.toThrow();
+    await sql.close();
+  });
+
+  test("restore cancels the pending purge job", async () => {
+    const { createDb } = await import("../src/db/client");
+    const { runMigrations } = await import("../src/db/migrate");
+    const { ArtifactService } = await import("../src/artifacts/service");
+    const { eq } = await import("drizzle-orm");
+    const { job } = await import("../src/db/schema");
+
+    const cfg = config({ DATABASE_URL: DSN! });
+    const { db, sql } = createDb(cfg);
+    await runMigrations(cfg);
+    const service = new ArtifactService(db, cfg);
+    const ownerId = crypto.randomUUID();
+    const created = await service.create(ownerId, "doc", "<p>x</p>");
+    await service.remove(ownerId, created.artifact.id);
+    const before = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
+    expect(before.length).toBe(1);
+    await service.restore(ownerId, created.artifact.id);
+    const after = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
+    expect(after.length).toBe(0);
+    await sql.close();
+  });
+});

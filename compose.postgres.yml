@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    # Credentials come solely from DATABASE_URL so the app and the database never
+    # disagree. Parse them here so operators set one value.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required when using bundled PostgreSQL}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required when using bundled PostgreSQL}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required when using bundled PostgreSQL}
+    volumes:
+      - portifact-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  portifact-postgres:

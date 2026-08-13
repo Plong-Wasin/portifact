@@ -1,0 +1,28 @@
+{
+  "name": "portifact",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/app.ts",
+    "start": "bun src/app.ts",
+    "worker": "bun src/worker.ts",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "user:create": "bun src/cli/user-create.ts",
+    "user:reset-password": "bun src/cli/reset-password.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "better-auth": "1.6.27",
+    "drizzle-orm": "latest",
+    "elysia": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "auth": "1.6.27",
+    "drizzle-kit": "latest",
+    "typescript": "latest"
+  }
+}

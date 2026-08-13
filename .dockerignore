@@ -1,0 +1,9 @@
+node_modules
+.git
+.scratch
+.playwright-mcp
+*.local.*
+.env
+.env.*
+!.env.example
+*.log
