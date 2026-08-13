@@ -55,13 +55,18 @@ if [[ "$confirmation" != "$db_name" ]]; then
   exit 1
 fi
 
-# Drop+recreate then load so existing tables do not conflict with the restore.
-# pg_restore reads DATABASE_URL; credentials never appear on the command line.
+# Drop+recreate the public AND drizzle schemas. The drizzle schema holds
+# __drizzle_migrations; leaving it untouched would desync migration history on a
+# cross-environment restore (history says applied when the code differs).
 if ! psql --no-password "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-  -c "DROP SCHEMA public CASCADE;" \
+  -c "DROP SCHEMA IF EXISTS public CASCADE;" \
+  -c "DROP SCHEMA IF EXISTS drizzle CASCADE;" \
   -c "CREATE SCHEMA public;" \
+  -c "CREATE SCHEMA drizzle;" \
   -c "GRANT ALL ON SCHEMA public TO postgres;" \
-  -c "GRANT ALL ON SCHEMA public TO public;"; then
+  -c "GRANT ALL ON SCHEMA public TO public;" \
+  -c "GRANT ALL ON SCHEMA drizzle TO postgres;" \
+  -c "GRANT ALL ON SCHEMA drizzle TO public;"; then
   echo "Schema reset failed" >&2
   exit 1
 fi
