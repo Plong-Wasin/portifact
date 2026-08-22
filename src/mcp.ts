@@ -13,6 +13,7 @@ import type { Auth } from "./auth";
 import type { Database } from "./db/client";
 import { ArtifactService } from "./artifacts/service";
 import { DomainError } from "./artifacts/domain";
+import { ARTIFACT_FORMATS } from "./artifacts/content";
 import { idempotencyKey } from "./db/schema";
 import { publicJwks } from "./oauth/jwt";
 import { newRequestContext, requestLog, log } from "./logger";
@@ -251,7 +252,7 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth)
         const rows = await service.list(ownerId, include_deleted);
         const startId = cursor(rawCursor);
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
-        const page = rows.slice(start, start + (limit ?? 50)).map(({ id, name, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }) => ({ id, name, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }));
+        const page = rows.slice(start, start + (limit ?? 50)).map(({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }) => ({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
       }),
     );
@@ -266,10 +267,11 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth)
       "list_versions",
       { inputSchema: z.object({ artifact_id: z.string(), cursor: z.string().optional(), limit: z.number().int().min(1).max(50).optional() }) },
       async ({ artifact_id, cursor: rawCursor, limit }) => invoke(context, "list_versions", "artifacts:read", async () => {
+        const artifact = await service.get(ownerId, artifact_id);
         const rows = await service.versionsMeta(ownerId, artifact_id);
         const startId = cursor(rawCursor);
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
-        const page = rows.slice(start, start + (limit ?? 50));
+        const page = rows.slice(start, start + (limit ?? 50)).map((version) => ({ ...version, format: artifact.format }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
       }),
     );
@@ -277,19 +279,23 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth)
     server.registerTool(
       "get_version",
       { inputSchema: z.object({ artifact_id: z.string(), version_id: z.string() }) },
-      async ({ artifact_id, version_id }) => invoke(context, "get_version", "artifacts:read", async () => service.version(ownerId, artifact_id, version_id)),
+      async ({ artifact_id, version_id }) => invoke(context, "get_version", "artifacts:read", async () => {
+        const artifact = await service.get(ownerId, artifact_id);
+        const version = await service.version(ownerId, artifact_id, version_id);
+        return { ...version, format: artifact.format };
+      }),
     );
 
     server.registerTool(
       "create_artifact",
-      { inputSchema: z.object({ name: z.string(), html: z.string(), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "create_artifact", "artifacts:write", async () => idempotent(db, config, context, "create_artifact", input, () => service.create(ownerId, input.name, input.html, "mcp"))),
+      { inputSchema: z.object({ name: z.string(), content: z.string(), format: z.enum(ARTIFACT_FORMATS), idempotency_key: z.string().min(1).optional() }) },
+      async (input) => invoke(context, "create_artifact", "artifacts:write", async () => idempotent(db, config, context, "create_artifact", input, () => service.create(ownerId, input.name, input.content, input.format, "mcp"))),
     );
 
     server.registerTool(
       "create_version",
-      { inputSchema: z.object({ artifact_id: z.string(), parent_version_id: z.string(), html: z.string(), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "create_version", "artifacts:write", async () => idempotent(db, config, context, "create_version", input, () => service.createVersion(ownerId, input.artifact_id, input.parent_version_id, input.html))),
+      { inputSchema: z.object({ artifact_id: z.string(), parent_version_id: z.string(), content: z.string(), format: z.enum(ARTIFACT_FORMATS), idempotency_key: z.string().min(1).optional() }) },
+      async (input) => invoke(context, "create_version", "artifacts:write", async () => idempotent(db, config, context, "create_version", input, () => service.createVersion(ownerId, input.artifact_id, input.parent_version_id, input.content, input.format))),
     );
 
     server.registerTool(

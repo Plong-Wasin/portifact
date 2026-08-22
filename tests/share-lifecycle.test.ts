@@ -25,7 +25,7 @@ describe.skipIf(!DSN)("share lifecycle", () => {
   test("publish then rotate revokes the old token and issues a new one", async () => {
     const { sql, service, ownerId } = await setup();
     try {
-      const created = await service.create(ownerId, "doc", "<p>hi</p>");
+      const created = await service.create(ownerId, "doc", "<p>hi</p>", "html");
       const version = (await service.versions(ownerId, created.artifact.id))[0];
 
       const pub1 = await service.publish(ownerId, created.artifact.id, version.id);
@@ -48,7 +48,7 @@ describe.skipIf(!DSN)("share lifecycle", () => {
   test("delete revokes active share link", async () => {
     const { sql, service, ownerId } = await setup();
     try {
-      const created = await service.create(ownerId, "doc", "<p>x</p>");
+      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
       const version = (await service.versions(ownerId, created.artifact.id))[0];
       const pub = await service.publish(ownerId, created.artifact.id, version.id);
 
@@ -64,7 +64,7 @@ describe.skipIf(!DSN)("share lifecycle", () => {
     try {
       const { eq } = await import("drizzle-orm");
       const { job } = await import("../src/db/schema");
-      const created = await service.create(ownerId, "doc", "<p>x</p>");
+      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
       await service.remove(ownerId, created.artifact.id);
       const before = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
       expect(before.length).toBe(1);

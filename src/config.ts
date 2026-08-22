@@ -44,8 +44,8 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
   const isLocal = localHosts.has(preliminary.hostname);
   const parsedAppUrl = appUrl(rawAppUrl, isLocal);
   const port = integer("PORT", env.PORT?.trim() || "3000", 1);
-  const maxHtmlBytes = integer("MAX_ARTIFACT_HTML_BYTES", env.MAX_ARTIFACT_HTML_BYTES?.trim() || "1048576", 1);
-  const maxStorageBytes = integer("MAX_STORAGE_BYTES_PER_USER", env.MAX_STORAGE_BYTES_PER_USER?.trim() || "1073741824", maxHtmlBytes);
+  const maxContentBytes = integer("MAX_ARTIFACT_CONTENT_BYTES", env.MAX_ARTIFACT_CONTENT_BYTES?.trim() || "1048576", 1);
+  const maxStorageBytes = integer("MAX_STORAGE_BYTES_PER_USER", env.MAX_STORAGE_BYTES_PER_USER?.trim() || "1073741824", maxContentBytes);
   const retentionDays = integer("SOFT_DELETE_RETENTION_DAYS", env.SOFT_DELETE_RETENTION_DAYS?.trim() || "30", 1);
   const accessTokenTtlSeconds = integer("ACCESS_TOKEN_TTL_SECONDS", env.ACCESS_TOKEN_TTL_SECONDS?.trim() || "900", 60);
   const idempotencyTtlSeconds = integer("IDEMPOTENCY_TTL_SECONDS", env.IDEMPOTENCY_TTL_SECONDS?.trim() || "86400", 60);
@@ -72,7 +72,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
     trustProxy,
     databaseUrl,
     registrationEnabled: boolean("REGISTRATION_ENABLED", env.REGISTRATION_ENABLED?.trim() || "false"),
-    maxHtmlBytes,
+    maxContentBytes,
     maxStorageBytes,
     retentionDays,
     accessTokenTtlSeconds,
@@ -80,7 +80,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
     shareLinkEncryptionKey,
     logLevel: logLevel as "debug" | "info" | "warn" | "error",
     betterAuthSecret,
-    requiredMigrationVersion: 4,
+    requiredMigrationVersion: 7,
     readyDbTimeoutMs: integer("READY_DB_TIMEOUT_MS", env.READY_DB_TIMEOUT_MS?.trim() || "2000", 100),
     shutdownTimeoutSeconds: integer("SHUTDOWN_TIMEOUT_SECONDS", env.SHUTDOWN_TIMEOUT_SECONDS?.trim() || "10", 1),
     accessTokenKeyId: env.ACCESS_TOKEN_KEY_ID?.trim() || "portifact-access-v1",

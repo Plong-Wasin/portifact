@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 describe("migration foundation", () => {
   test("ships an initial migration and journal", () => {
     expect(existsSync("drizzle/0000_hard_mordo.sql")).toBe(true);
+    expect(existsSync("drizzle/0004_format_neutral_content.sql")).toBe(true);
+    expect(existsSync("drizzle/0005_migrate_html_content.sql")).toBe(true);
+    expect(existsSync("drizzle/0006_drop_legacy_html_column.sql")).toBe(true);
     expect(existsSync("drizzle/meta/_journal.json")).toBe(true);
   });
 

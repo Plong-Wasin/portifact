@@ -108,7 +108,7 @@ Never commit `.env`, database backups, private keys, or generated secrets.
 
 See `.env.example` for all settings. Important limits include:
 
-- `MAX_ARTIFACT_HTML_BYTES`: maximum HTML size per version
+- `MAX_ARTIFACT_CONTENT_BYTES`: maximum UTF-8 source size per artifact version
 - `MAX_STORAGE_BYTES_PER_USER`: per-user retained storage quota
 - `SOFT_DELETE_RETENTION_DAYS`: delay before deleted artifacts are purged
 - `ACCESS_TOKEN_TTL_SECONDS`: MCP access-token lifetime

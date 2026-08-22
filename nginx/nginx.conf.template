@@ -21,7 +21,7 @@ server {
 
     if ($host != __APP_HOST__) { return 444; }
 
-    client_max_body_size __MAX_ARTIFACT_HTML_BYTES__;
+    client_max_body_size __MAX_ARTIFACT_CONTENT_BYTES__;
     # Headers bounded above the body limit so Nginx rejects oversized headers
     # before the app sees them; two short timers stop slow-header attacks.
     large_client_header_buffers 4 16k;

@@ -3,10 +3,26 @@ import type { Auth } from "../auth";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { ArtifactService } from "../artifacts/service";
-import { artifactHeaders, DomainError, escapeHtml, robotsMeta } from "../artifacts/domain";
+import { artifactHeaders, ARTIFACT_CSP, DomainError, escapeHtml, robotsMeta } from "../artifacts/domain";
+import { contentMimeType, decodeContent, formatExtension, formatFromFilename, type ArtifactFormat } from "../artifacts/content";
+import { renderPreview } from "../artifacts/renderer";
 
 const csrfCookie = "portifact_csrf";
 const csrfHeader = "x-csrf-token";
+const DOCUMENT_CSP = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline'",
+  "img-src https: data:",
+  "font-src https: data:",
+  "media-src https: data:",
+  "connect-src 'none'",
+  "worker-src 'none'",
+  "frame-src 'none'",
+  "child-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
 
 function cookies(request: Request): Record<string, string> {
   return Object.fromEntries((request.headers.get("cookie") ?? "").split(/;\s*/).filter(Boolean).map((item) => {
@@ -62,6 +78,37 @@ function withCsrf(response: Response, request: Request) {
   return response;
 }
 
+export function sourcePage(body: string): Response {
+  const response = html(body);
+  artifactHeaders(response.headers);
+  return response;
+}
+
+function contentHeaders(format: ArtifactFormat): Headers {
+  const headers = artifactHeaders(new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Security-Policy": format === "html" ? ARTIFACT_CSP : DOCUMENT_CSP,
+  }));
+  return headers;
+}
+
+async function previewContent(format: ArtifactFormat, source: string): Promise<Response> {
+  const preview = await renderPreview(format, source);
+  const warning = preview.warnings.length
+    ? `<aside role="status"><strong>Warning:</strong> ${preview.warnings.map(escapeHtml).join(" ")}</aside>`
+    : "";
+  return new Response(`${warning}${preview.html}`, { headers: contentHeaders(format) });
+}
+
+function downloadName(name: string, format: ArtifactFormat): string {
+  const safeName = name.replace(/[\\/\r\n"\u0000-\u001f\u007f]+/g, "_").trim() || "artifact";
+  return `${safeName}${formatExtension(format)}`;
+}
+
+export function previewSandbox(format: ArtifactFormat): string {
+  return format === "html" ? `sandbox="allow-scripts"` : "sandbox";
+}
+
 export function registerDashboardRoutes(app: any, db: Database, config: Config, auth?: Auth) {
   const service = new ArtifactService(db, config);
   app.get("/", async ({ request }: { request: Request }) => sessionRedirect(request, (await sessionUser(auth, request)) ? "/artifacts" : "/login"));
@@ -83,7 +130,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     const token = cookies(request)[csrfCookie] ?? "";
     return withCsrf(html(`<main><nav><a href="/account">Account</a><a href="/artifacts/new">New artifact</a><a href="/trash">Trash</a><a href="/connections">Connections</a></nav><h1>Your artifacts</h1><ul>${rows.map((row) => `<li><a href="/artifacts/${row.id}">${escapeHtml(row.name)}</a> — ${row.publishedVersionId ? "published" : "private"}</li>`).join("") || "<li>No artifacts yet.</li>"}</ul><p data-csrf="${escapeHtml(token)}"></p></main>`), request);
   });
-  app.get("/artifacts/new", async ({ request }: { request: Request }) => (await sessionUser(auth, request)) ? withCsrf(html(`<main><h1>Upload HTML</h1><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>HTML file<input name="file" type="file" accept=".html,text/html" required></label><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Create private artifact</button></form></main>`), request) : sessionRedirect(request, "/login"));
+  app.get("/artifacts/new", async ({ request }: { request: Request }) => (await sessionUser(auth, request)) ? withCsrf(html(`<main><h1>Upload artifact</h1><p>Supported files: .html, .md, and .txt. Files are private until you publish them.</p><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>Artifact file<input name="file" type="file" accept=".html,.md,.txt,text/html,text/markdown,text/plain" required></label><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Create private artifact</button></form></main>`), request) : sessionRedirect(request, "/login"));
   app.post("/artifacts", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
@@ -91,11 +138,16 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     const form = await request.formData();
     const name = form.get("name");
     const file = form.get("file");
-    if (!(file instanceof File) || !file.name.toLowerCase().endsWith(".html")) return new Response("HTML file required", { status: 400 });
-    if (file.size > config.maxHtmlBytes) return new Response("HTML file too large", { status: 413 });
-    const htmlContent = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(await file.arrayBuffer()));
-    const created = await service.create(user.id, name, htmlContent);
-    return sessionRedirect(request, `/artifacts/${created.artifact.id}`);
+    if (!(file instanceof File)) return new Response("Artifact file required", { status: 400 });
+    try {
+      const format = formatFromFilename(file.name);
+      const content = decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes);
+      const created = await service.create(user.id, name, content, format);
+      return sessionRedirect(request, `/artifacts/${created.artifact.id}`);
+    } catch (error) {
+      if (error instanceof DomainError) return new Response(error.message, { status: error.status });
+      return new Response("Invalid artifact file", { status: 400 });
+    }
   });
   app.get("/artifacts/:id", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
@@ -104,7 +156,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
       const row = await service.get(user.id, params.id);
       const versions = await service.versions(user.id, row.id);
       const token = cookies(request)[csrfCookie] ?? "";
-      return withCsrf(html(`<main><a href="/artifacts">Back</a><h1>${escapeHtml(row.name)}</h1><p>Created ${row.createdAt.toISOString()}</p><form method="post" action="/artifacts/${row.id}/rename"><label>Rename<input name="name" value="${escapeHtml(row.name)}" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rename</button></form>${row.publishedVersionId ? `<form method="post" action="/artifacts/${row.id}/unpublish" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Unpublish</button></form><form method="post" action="/artifacts/${row.id}/rotate" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rotate share link</button></form>` : ""}<h2>Versions</h2><table><thead><tr><th>Ordinal</th><th>Bytes</th><th>Digest</th><th>Source</th><th>Actions</th></tr></thead><tbody>${versions.map((version) => `<tr><td>${version.ordinal}</td><td>${version.byteSize}</td><td>${version.digest}</td><td>${escapeHtml(version.source)}</td><td><a href="/artifacts/${row.id}/versions/${version.id}/preview">Preview</a> <a href="/artifacts/${row.id}/versions/${version.id}/download">Download</a><form method="post" action="/artifacts/${row.id}/publish/${version.id}" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Publish</button></form></td></tr>`).join("")}</tbody></table><form method="post" action="/artifacts/${row.id}/delete"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Delete</button></form></main>`), request);
+      return withCsrf(html(`<main><a href="/artifacts">Back</a><h1>${escapeHtml(row.name)}</h1><p>Format: ${escapeHtml(row.format)} · Created ${row.createdAt.toISOString()}</p><form method="post" action="/artifacts/${row.id}/rename"><label>Rename<input name="name" value="${escapeHtml(row.name)}" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rename</button></form>${row.publishedVersionId ? `<form method="post" action="/artifacts/${row.id}/unpublish" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Unpublish</button></form><form method="post" action="/artifacts/${row.id}/rotate" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rotate share link</button></form>` : ""}<h2>Versions</h2><table><thead><tr><th>Ordinal</th><th>Bytes</th><th>Digest</th><th>Source</th><th>Actions</th></tr></thead><tbody>${versions.map((version) => `<tr><td>${version.ordinal}</td><td>${version.byteSize}</td><td>${version.digest}</td><td>${escapeHtml(version.source)}</td><td><a href="/artifacts/${row.id}/versions/${version.id}/preview">Preview</a> <a href="/artifacts/${row.id}/versions/${version.id}/source">Source</a> <a href="/artifacts/${row.id}/versions/${version.id}/download">Download</a><form method="post" action="/artifacts/${row.id}/publish/${version.id}" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Publish</button></form></td></tr>`).join("")}</tbody></table><form method="post" action="/artifacts/${row.id}/delete"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Delete</button></form></main>`), request);
     } catch (error) {
       if (error instanceof DomainError && error.code === "ARTIFACT_NOT_FOUND") return new Response("Not Found", { status: 404 });
       return new Response("Internal Server Error", { status: 500 });
@@ -121,21 +173,35 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/artifacts/:id/versions/:versionId/download", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
     if (!user) return sessionRedirect(request, "/login");
+    const artifact = await service.get(user.id, params.id);
     const version = await service.version(user.id, params.id, params.versionId);
-    const headers = artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `attachment; filename="${params.versionId}.html"` }));
-    return new Response(version.html, { headers });
+    const filename = downloadName(artifact.name, artifact.format);
+    const headers = artifactHeaders(new Headers({
+      "Content-Type": contentMimeType(artifact.format),
+      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    }));
+    return new Response(version.content, { headers });
   });
   app.get("/artifacts/:id/versions/:versionId/content", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return new Response("Not Found", { status: 404 });
+    if (!user) return new Response("Not Found", { status: 404, headers: artifactHeaders() });
+    const artifact = await service.get(user.id, params.id);
     const version = await service.version(user.id, params.id, params.versionId);
-    return new Response(version.html, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src https: data: blob:; connect-src https:; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })) });
+    return previewContent(artifact.format, version.content);
+  });
+  app.get("/artifacts/:id/versions/:versionId/source", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    const user = await sessionUser(auth, request);
+    if (!user) return sessionRedirect(request, "/login");
+    const artifact = await service.get(user.id, params.id);
+    const version = await service.version(user.id, params.id, params.versionId);
+    return sourcePage(`<main><p><a href="/artifacts/${artifact.id}/versions/${version.id}/preview">Back to preview</a></p><h1>${escapeHtml(artifact.name)} source</h1><p>Format: ${escapeHtml(artifact.format)} · Version ${version.ordinal}</p><pre>${escapeHtml(version.content)}</pre></main>`);
   });
   app.get("/artifacts/:id/versions/:versionId/preview", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
     if (!user) return sessionRedirect(request, "/login");
+    const artifact = await service.get(user.id, params.id);
     await service.version(user.id, params.id, params.versionId);
-    return new Response(`<!doctype html><html><head>${robotsMeta()}<title>Preview</title></head><body><aside><strong>Warning:</strong> This content was user-created and is untrusted. Never enter passwords or sensitive information.</aside><iframe sandbox="allow-scripts" src="/artifacts/${params.id}/versions/${params.versionId}/content" title="Artifact preview" style="width:100%;height:80vh"></iframe></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8" })) });
+    return new Response(`<!doctype html><html><head>${robotsMeta()}<title>Preview</title></head><body><aside><strong>Warning:</strong> This content was user-created and is untrusted. Never enter passwords or sensitive information.</aside><p><a href="/artifacts/${artifact.id}/versions/${params.versionId}/source">View source</a> · <a href="/artifacts/${artifact.id}">Back to artifact</a></p><iframe ${previewSandbox(artifact.format)} src="/artifacts/${params.id}/versions/${params.versionId}/content" title="Artifact preview" style="width:100%;height:80vh"></iframe></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8" })) });
   });
   app.post("/artifacts/:id/publish/:versionId", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
@@ -200,7 +266,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/s/:token", async ({ params }: { params: Record<string, string> }) => {
     try {
       const shared = await service.shared(params.token);
-      return new Response(`<!doctype html><html><head>${robotsMeta()}<title>Shared artifact</title></head><body><aside><strong>Warning:</strong> This content was user-created and is untrusted. Never enter passwords or sensitive information.</aside><iframe sandbox="allow-scripts" src="/s/${params.token}/content" title="Shared artifact" style="width:100%;height:80vh"></iframe></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8" })) });
+      return new Response(`<!doctype html><html><head>${robotsMeta()}<title>Shared artifact</title></head><body><aside><strong>Warning:</strong> This content was user-created and is untrusted. Never enter passwords or sensitive information.</aside><p><a href="/s/${params.token}/source">View source</a></p><iframe ${previewSandbox(shared.artifact.format)} src="/s/${params.token}/content" title="Shared artifact" style="width:100%;height:80vh"></iframe></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8" })) });
     } catch (error) {
       const status = error instanceof DomainError ? error.status : 404;
       return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });
@@ -209,7 +275,16 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/s/:token/content", async ({ params }: { params: Record<string, string> }) => {
     try {
       const shared = await service.shared(params.token);
-      return new Response(shared.version.html, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src https: data: blob:; connect-src https:; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })) });
+      return previewContent(shared.artifact.format, shared.version.content);
+    } catch (error) {
+      const status = error instanceof DomainError ? error.status : 404;
+      return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });
+    }
+  });
+  app.get("/s/:token/source", async ({ params }: { params: Record<string, string> }) => {
+    try {
+      const shared = await service.shared(params.token);
+      return new Response(`<!doctype html><html><head>${robotsMeta()}<meta charset="utf-8"><title>Shared artifact source</title></head><body><main><p><a href="/s/${params.token}">Back to preview</a></p><h1>${escapeHtml(shared.artifact.name)} source</h1><p>Format: ${escapeHtml(shared.artifact.format)} · Version ${shared.version.ordinal}</p><pre>${escapeHtml(shared.version.content)}</pre></main></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'" })) });
     } catch (error) {
       const status = error instanceof DomainError ? error.status : 404;
       return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });

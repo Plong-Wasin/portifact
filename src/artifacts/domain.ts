@@ -59,24 +59,6 @@ export function validateName(value: unknown): string {
   return name;
 }
 
-export function decodeHtml(bytes: Uint8Array, maxBytes: number): string {
-  if (bytes.byteLength === 0) throw new DomainError("EMPTY_HTML");
-  if (bytes.byteLength > maxBytes) throw new DomainError("HTML_TOO_LARGE");
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new DomainError("INVALID_HTML_ENCODING");
-  }
-}
-
-export function htmlBytes(value: string): Uint8Array {
-  return new TextEncoder().encode(value);
-}
-
-export function digestHtml(value: string): string {
-  return createHash("sha256").update(htmlBytes(value)).digest("hex");
-}
-
 export function tokenValue(): string {
   return randomBytes(32).toString("base64url");
 }

@@ -55,7 +55,7 @@ services:
     build: ./nginx
     environment:
       APP_HOST: ${APP_HOST:?APP_HOST is required — set it to your APP_URL hostname}
-      MAX_ARTIFACT_HTML_BYTES: ${MAX_ARTIFACT_HTML_BYTES:-1048576}
+      MAX_ARTIFACT_CONTENT_BYTES: ${MAX_ARTIFACT_CONTENT_BYTES:-1048576}
     restart: unless-stopped
     stop_grace_period: 10s
     ports:

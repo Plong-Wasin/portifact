@@ -15,7 +15,7 @@ const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, er
 const SECRET_KEYS = new Set([
   "password", "passwd", "secret", "token", "accesstoken", "refreshtoken",
   "authorization", "cookie", "setcookie", "session", "code",
-  "clientsecret", "databaseurl", "sharetoken", "html", "body", "privatekey",
+  "clientsecret", "databaseurl", "sharetoken", "content", "body", "privatekey",
 ]);
 
 function normalize(key: string): string {

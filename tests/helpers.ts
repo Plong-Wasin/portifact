@@ -12,7 +12,7 @@ export function env(overrides: Record<string, string> = {}): Record<string, stri
     TRUST_PROXY: "false",
     DATABASE_URL: "postgresql://portifact:portifact@localhost:5432/portifact_test",
     REGISTRATION_ENABLED: "false",
-    MAX_ARTIFACT_HTML_BYTES: "1048576",
+    MAX_ARTIFACT_CONTENT_BYTES: "1048576",
     MAX_STORAGE_BYTES_PER_USER: "10485760",
     RETENTION_DAYS: "30",
     ACCESS_TOKEN_TTL_SECONDS: "900",

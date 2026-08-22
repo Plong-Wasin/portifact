@@ -15,8 +15,8 @@ describe("loadConfig", () => {
   test("loads safe defaults", () => {
     const config = loadConfig(base);
     expect(config.registrationEnabled).toBe(false);
-    expect(config.maxHtmlBytes).toBe(1048576);
-    expect(config.requiredMigrationVersion).toBe(4);
+    expect(config.maxContentBytes).toBe(1048576);
+    expect(config.requiredMigrationVersion).toBe(7);
   });
 
   test("rejects ambiguous booleans", () => {
@@ -28,7 +28,7 @@ describe("loadConfig", () => {
   });
 
   test("rejects storage below one version", () => {
-    expect(() => loadConfig({ ...base, MAX_ARTIFACT_HTML_BYTES: "100", MAX_STORAGE_BYTES_PER_USER: "99" })).toThrow();
+    expect(() => loadConfig({ ...base, MAX_ARTIFACT_CONTENT_BYTES: "100", MAX_STORAGE_BYTES_PER_USER: "99" })).toThrow();
   });
 
   test("requires BETTER_AUTH_SECRET", () => {

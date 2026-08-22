@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { artifact, artifactVersion, job, oauthAccessToken, oauthApplication, shareLink } from "../db/schema";
-import { decryptToken, DomainError, digestHtml, encryptToken, htmlBytes, tokenDigest, tokenValue, validateName } from "./domain";
+import { contentBytes, contentDigest, type ArtifactFormat } from "./content";
+import { decryptToken, DomainError, encryptToken, tokenDigest, tokenValue, validateName } from "./domain";
 import type { Config } from "../config";
 
 const now = () => new Date();
@@ -38,7 +39,7 @@ export class ArtifactService {
     return this.db.select().from(artifactVersion).where(eq(artifactVersion.artifactId, artifactId)).orderBy(asc(artifactVersion.ordinal));
   }
 
-  // Metadata-only listing: omits the html column so list_versions does not pull
+  // Metadata-only listing: omits the content columns so list_versions does not pull
   // potentially MB of content per version only to discard it.
   async versionsMeta(ownerId: string, artifactId: string, includeDeleted = false) {
     await this.get(ownerId, artifactId, includeDeleted);
@@ -56,19 +57,19 @@ export class ArtifactService {
     return row;
   }
 
-  async create(ownerId: string, nameInput: unknown, html: string, source = "dashboard") {
+  async create(ownerId: string, nameInput: unknown, content: string, format: ArtifactFormat, source = "dashboard") {
     const name = validateName(nameInput);
-    const bytes = htmlBytes(html);
-    if (!bytes.byteLength) throw new DomainError("EMPTY_HTML");
-    if (bytes.byteLength > this.config.maxHtmlBytes) throw new DomainError("HTML_TOO_LARGE");
+    const bytes = contentBytes(content);
+    if (!bytes.byteLength) throw new DomainError("EMPTY_CONTENT");
+    if (bytes.byteLength > this.config.maxContentBytes) throw new DomainError("CONTENT_TOO_LARGE", "content is too large", 413);
     const retained = await this.db.select({ bytes: sql<number>`coalesce(sum(${artifactVersion.byteSize}), 0)` }).from(artifactVersion).innerJoin(artifact, eq(artifactVersion.artifactId, artifact.id)).where(and(eq(artifact.ownerId, ownerId), isNull(artifact.deletedAt)));
     if (Number(retained[0]?.bytes ?? 0) + bytes.byteLength > this.config.maxStorageBytes) throw new DomainError("USER_STORAGE_LIMIT_EXCEEDED");
     const artifactId = id();
     const versionId = id();
     const created = now();
     await this.db.transaction(async (tx) => {
-      await tx.insert(artifact).values({ id: artifactId, ownerId, name, createdAt: created, updatedAt: created });
-      await tx.insert(artifactVersion).values({ id: versionId, artifactId, ordinal: 1, html, byteSize: bytes.byteLength, digest: digestHtml(html), source, creatorId: ownerId, createdAt: created });
+      await tx.insert(artifact).values({ id: artifactId, ownerId, name, format, createdAt: created, updatedAt: created });
+      await tx.insert(artifactVersion).values({ id: versionId, artifactId, ordinal: 1, content, byteSize: bytes.byteLength, digest: contentDigest(content), source, creatorId: ownerId, createdAt: created });
       await tx.update(artifact).set({ latestVersionId: versionId }).where(and(eq(artifact.id, artifactId), eq(artifact.ownerId, ownerId)));
     });
     return { artifact: await this.get(ownerId, artifactId), version: await this.version(ownerId, artifactId, versionId) };
@@ -81,19 +82,22 @@ export class ArtifactService {
     return this.get(ownerId, artifactId);
   }
 
-  async createVersion(ownerId: string, artifactId: string, parentId: string, html: string, source = "mcp") {
+  async createVersion(ownerId: string, artifactId: string, parentId: string, content: string, format: ArtifactFormat, source = "mcp") {
     const current = await this.get(ownerId, artifactId);
     const parent = await this.version(ownerId, artifactId, parentId);
-    const bytes = htmlBytes(html);
-    if (!bytes.byteLength) throw new DomainError("EMPTY_HTML");
-    if (bytes.byteLength > this.config.maxHtmlBytes) throw new DomainError("HTML_TOO_LARGE");
+    if (current.format !== format) throw new DomainError("ARTIFACT_FORMAT_MISMATCH", "artifact format cannot change", 409);
+    const bytes = contentBytes(content);
+    if (!bytes.byteLength) throw new DomainError("EMPTY_CONTENT");
+    if (bytes.byteLength > this.config.maxContentBytes) throw new DomainError("CONTENT_TOO_LARGE", "content is too large", 413);
     const created = now();
     const versionId = id();
     await this.db.transaction(async (tx) => {
       const locked = await tx.select().from(artifact).where(and(eq(artifact.ownerId, ownerId), eq(artifact.id, artifactId))).for("update");
       if (!locked[0] || locked[0].deletedAt) throw new DomainError("ARTIFACT_DELETED", "artifact deleted", 409);
+      const retained = await tx.select({ bytes: sql<number>`coalesce(sum(${artifactVersion.byteSize}), 0)` }).from(artifactVersion).innerJoin(artifact, eq(artifactVersion.artifactId, artifact.id)).where(and(eq(artifact.ownerId, ownerId), isNull(artifact.deletedAt)));
+      if (Number(retained[0]?.bytes ?? 0) + bytes.byteLength > this.config.maxStorageBytes) throw new DomainError("USER_STORAGE_LIMIT_EXCEEDED");
       const [last] = await tx.select({ ordinal: artifactVersion.ordinal }).from(artifactVersion).where(eq(artifactVersion.artifactId, artifactId)).orderBy(desc(artifactVersion.ordinal)).limit(1);
-      await tx.insert(artifactVersion).values({ id: versionId, artifactId, parentVersionId: parent.id, ordinal: (last?.ordinal ?? 0) + 1, html, byteSize: bytes.byteLength, digest: digestHtml(html), source, creatorId: ownerId, createdAt: created });
+      await tx.insert(artifactVersion).values({ id: versionId, artifactId, parentVersionId: parent.id, ordinal: (last?.ordinal ?? 0) + 1, content, byteSize: bytes.byteLength, digest: contentDigest(content), source, creatorId: ownerId, createdAt: created });
       await tx.update(artifact).set({ latestVersionId: versionId, updatedAt: created }).where(and(eq(artifact.ownerId, ownerId), eq(artifact.id, artifactId)));
     });
     return { artifact: current, version: await this.version(ownerId, artifactId, versionId) };

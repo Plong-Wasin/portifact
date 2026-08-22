@@ -2,12 +2,12 @@
 set -eu
 
 : "${APP_HOST:?APP_HOST is required}"
-: "${MAX_ARTIFACT_HTML_BYTES:?MAX_ARTIFACT_HTML_BYTES is required}"
-case "$MAX_ARTIFACT_HTML_BYTES" in
-  *[!0-9]*|'') echo "MAX_ARTIFACT_HTML_BYTES must be a positive integer" >&2; exit 1 ;;
+: "${MAX_ARTIFACT_CONTENT_BYTES:?MAX_ARTIFACT_CONTENT_BYTES is required}"
+case "$MAX_ARTIFACT_CONTENT_BYTES" in
+  *[!0-9]*|'') echo "MAX_ARTIFACT_CONTENT_BYTES must be a positive integer" >&2; exit 1 ;;
 esac
-case "$MAX_ARTIFACT_HTML_BYTES" in
-  0) echo "MAX_ARTIFACT_HTML_BYTES must be greater than zero" >&2; exit 1 ;;
+case "$MAX_ARTIFACT_CONTENT_BYTES" in
+  0) echo "MAX_ARTIFACT_CONTENT_BYTES must be greater than zero" >&2; exit 1 ;;
 esac
 
 # APP_HOST must be a single DNS name or bracketed IPv6 / dotted IPv4. Reject any
@@ -29,6 +29,6 @@ case "$APP_HOST" in
 esac
 
 host=$(printf '%s' "$APP_HOST" | sed 's/[\\/&]/\\&/g')
-size=$(printf '%s' "$MAX_ARTIFACT_HTML_BYTES" | sed 's/[\\/&]/\\&/g')
-sed -e "s/__APP_HOST__/$host/g" -e "s/__MAX_ARTIFACT_HTML_BYTES__/$size/g" \
+size=$(printf '%s' "$MAX_ARTIFACT_CONTENT_BYTES" | sed 's/[\\/&]/\\&/g')
+sed -e "s/__APP_HOST__/$host/g" -e "s/__MAX_ARTIFACT_CONTENT_BYTES__/$size/g" \
   /etc/nginx/portifact.conf.template > /etc/nginx/conf.d/default.conf

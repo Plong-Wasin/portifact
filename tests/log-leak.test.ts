@@ -44,7 +44,7 @@ describe("logs do not leak secrets", () => {
     const sample = {
       password: "x", secret: "x", token: "x", access_token: "x", refresh_token: "x",
       authorization: "x", cookie: "x", session: "x", code: "x", client_secret: "x",
-      database_url: "x", html: "x",
+      database_url: "x", content: "x",
     };
     const out = redact(sample) as Record<string, string>;
     for (const key of Object.keys(out)) {

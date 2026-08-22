@@ -29,6 +29,27 @@
       "when": 1786622638649,
       "tag": "0003_happy_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787428927590,
+      "tag": "0004_format_neutral_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787429002511,
+      "tag": "0005_migrate_html_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787429813074,
+      "tag": "0006_drop_legacy_html_column",
+      "breakpoints": true
     }
   ]
 }

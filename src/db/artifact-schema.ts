@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema";
+import { ARTIFACT_FORMATS } from "../artifacts/content";
 
 export const oauthApplication = pgTable("oauth_application", {
   id: text("id").primaryKey().notNull(),
@@ -63,6 +64,7 @@ export const artifact = pgTable("artifact", {
   id: text("id").primaryKey().notNull(),
   ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  format: text("format", { enum: ARTIFACT_FORMATS }).notNull(),
   latestVersionId: text("latest_version_id"),
   publishedVersionId: text("published_version_id"),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -76,7 +78,7 @@ export const artifactVersion = pgTable("artifact_version", {
   artifactId: text("artifact_id").notNull().references(() => artifact.id, { onDelete: "cascade" }),
   parentVersionId: text("parent_version_id"),
   ordinal: integer("ordinal").notNull(),
-  html: text("html").notNull(),
+  content: text("content").notNull(),
   byteSize: integer("byte_size").notNull(),
   digest: text("digest").notNull(),
   source: text("source").notNull(),

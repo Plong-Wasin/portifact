@@ -17,10 +17,16 @@
     "@modelcontextprotocol/server": "2.0.0",
     "better-auth": "1.6.27",
     "drizzle-orm": "latest",
-    "elysia": "latest"
+    "elysia": "latest",
+    "jsdom": "^30.0.1",
+    "marked": "^18.0.10",
+    "mermaid": "11.17.0",
+    "sanitize-html": "^2.17.7"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/jsdom": "^30.0.0",
+    "@types/sanitize-html": "^2.16.1",
     "auth": "1.6.27",
     "drizzle-kit": "latest",
     "typescript": "latest"
