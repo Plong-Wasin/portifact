@@ -1,3 +1,5 @@
+# Dokploy routes the configured domain to the app service and terminates TLS.
+# Configure the domain in Dokploy and point it at service `app`, port 3000.
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,22 +19,26 @@ services:
       start_period: 5s
 
   migrate:
-    build: .
+    build:
+      context: .
     command: bun run db:migrate
-    env_file: .env
+    env_file:
+      - .env
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
 
   app:
-    build: .
+    build:
+      context: .
     command: bun run start
-    env_file: .env
+    env_file:
+      - .env
     environment:
       PORT: "3000"
-    ports:
-      - "${HOST_PORT:-3000}:3000"
+    expose:
+      - "3000"
     restart: unless-stopped
     stop_grace_period: 15s
     depends_on:
@@ -46,9 +52,11 @@ services:
       start_period: 5s
 
   worker:
-    build: .
+    build:
+      context: .
     command: bun run worker
-    env_file: .env
+    env_file:
+      - .env
     restart: unless-stopped
     stop_grace_period: 15s
     depends_on:

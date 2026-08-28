@@ -1,6 +1,6 @@
 # Portifact
 
-Self-hosted artifact storage and sharing service with a web UI, MCP API, PostgreSQL, background cleanup worker, and nginx.
+Self-hosted artifact storage and sharing service with a web UI, MCP API, PostgreSQL, and background cleanup worker.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Start all services:
 docker compose up -d --build
 ```
 
-Open `http://localhost`.
+Open `http://localhost:3000`. To use another host port, set `HOST_PORT` in `.env`, for example `HOST_PORT=8080`, then open `http://localhost:8080`. The app port inside the container remains fixed at `3000`.
 
 The first migration runs automatically before the app and worker start. Check service health:
 
@@ -84,7 +84,6 @@ For local development without Docker, set `DATABASE_URL` to a reachable PostgreS
 | `migrate` | Applies Drizzle migrations once per deployment |
 | `app` | Web UI, authentication, artifact API, and MCP endpoint |
 | `worker` | Processes delayed artifact purge jobs |
-| `nginx` | Reverse proxy on port 80 |
 
 ## Backup and restore
 
