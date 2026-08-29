@@ -27,9 +27,6 @@ export function createAuth(db: Database, config: Config) {
         else console.log(line);
       },
     },
-    onAPIError: {
-      errorURL: `${config.appUrl.origin}/login/error`,
-    },
     emailAndPassword: {
       enabled: !microsoft,
       disableSignUp: !config.registrationEnabled,

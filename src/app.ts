@@ -82,19 +82,37 @@ function rebaseAuthRequest(request: Request): Request {
 async function authHandlerRef(auth: Auth, request: Request, db: Database, config: Config) {
   const rebased = rebaseAuthRequest(request);
   const pathname = new URL(rebased.url).pathname;
+  const isMicrosoftCallback = rebased.method === "GET" && pathname === "/api/auth/callback/microsoft";
   const isTokenEndpoint = rebased.method === "POST" && pathname === "/api/auth/mcp/token";
   const isSignInUp =
     rebased.method === "POST" &&
     ["/api/auth/sign-in/email", "/api/auth/sign-up/email"].includes(pathname);
 
-  // Pass-through for everything that is not a rewritten sign-in/up or the MCP
-  // token endpoint. For the token endpoint we still call Better Auth verbatim,
-  // then rewrite the opaque access_token into a locally-verifiable JWT below.
-  if (!isSignInUp && !isTokenEndpoint) return auth.handler(rebased);
+  // Pass-through for everything that is not a rewritten sign-in/up, Microsoft
+  // callback, or MCP token endpoint. For the token endpoint we still call
+  // Better Auth verbatim, then rewrite the opaque access_token into a
+  // locally-verifiable JWT below.
+  if (!isSignInUp && !isTokenEndpoint && !isMicrosoftCallback) return auth.handler(rebased);
 
   const response = isSignInUp ? await rewrittenAuth(auth, rebased) : await auth.handler(rebased);
+  if (isMicrosoftCallback) return rewriteMicrosoftCallbackError(response, config);
   if (!isTokenEndpoint || !response.ok) return response;
   return rewriteAccessToken(response, db, config);
+}
+
+function rewriteMicrosoftCallbackError(response: Response, config: Config): Response {
+  if (response.status < 300 || response.status >= 400) return response;
+  const location = response.headers.get("location");
+  if (!location) return response;
+  try {
+    const target = new URL(location, config.appUrl.origin);
+    if (target.origin === config.appUrl.origin && target.pathname === "/api/auth/error") {
+      return new Response(null, { status: 302, headers: { Location: `${config.appUrl.origin}/login/error` } });
+    }
+  } catch {
+    return response;
+  }
+  return response;
 }
 
 async function rewrittenAuth(auth: Auth, rebased: Request) {

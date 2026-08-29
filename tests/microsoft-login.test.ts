@@ -86,6 +86,29 @@ describe("Microsoft login page", () => {
     expect(body).toContain("/api/auth/mcp/authorize?client_id=mcp-client&amp;redirect_uri=https%3A%2F%2Fmcp.example%2Fcallback");
   });
 
+  test("uses Microsoft login when MCP authorization needs a session", async () => {
+    const appConfig = config(microsoftEnv);
+    const auth = createAuth(noDatabase, appConfig);
+    const app = createApp(noDatabase, appConfig, auth);
+    const query = new URLSearchParams({
+      client_id: "mcp-client",
+      redirect_uri: "https://mcp.example/callback",
+      response_type: "code",
+      scope: "artifacts:read",
+      code_challenge: "challenge",
+      code_challenge_method: "S256",
+      state: "mcp-state",
+    });
+    const response = await app.handle(new Request(`http://localhost/api/auth/mcp/authorize?${query}`));
+
+    expect(response.status).toBe(302);
+    const loginURL = new URL(response.headers.get("location") ?? "http://invalid", "http://localhost");
+    expect(loginURL.pathname).toBe("/login");
+    expect(loginURL.searchParams.get("client_id")).toBe("mcp-client");
+    const login = await app.handle(new Request(`http://localhost${loginURL.pathname}${loginURL.search}`));
+    expect(await login.text()).toContain("Sign in with Microsoft");
+  });
+
   test("shows a generic retry page for a failed Microsoft flow", async () => {
     const response = await createApp(noDatabase, config(microsoftEnv)).handle(new Request("http://localhost/login/error?error=invalid_code&code=secret"));
     const body = await response.text();
@@ -119,6 +142,16 @@ describe("Microsoft login page", () => {
     const response = await app.handle(new Request("http://localhost/api/auth/callback/microsoft?code=secret&state=invalid"));
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("http://localhost/login/error?error=state_mismatch");
+    expect(response.headers.get("location")).toBe("http://localhost/login/error");
+  });
+
+  test("keeps the existing MCP error endpoint contract", async () => {
+    const appConfig = config(microsoftEnv);
+    const auth = createAuth(noDatabase, appConfig);
+    const app = createApp(noDatabase, appConfig, auth);
+    const response = await app.handle(new Request("http://localhost/api/auth/error?error=invalid_client"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
   });
 });

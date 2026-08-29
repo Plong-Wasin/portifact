@@ -94,6 +94,7 @@ describe.skipIf(!Bun.env.TEST_DATABASE_URL)("Microsoft authentication callback (
         return Response.json({ token_type: "Bearer", access_token: "test-access-token", id_token: await signedIdentity(identity, privateKey), scope: "openid profile email", expires_in: 3600 });
       }
       if (url.endsWith("/discovery/v2.0/keys")) return Response.json({ keys: [jwk] });
+      if (url.includes("graph.microsoft.com")) throw new Error("Microsoft Graph must not be called for sign-in");
       return originalFetch(input, init);
     }) as typeof fetch;
 
@@ -133,7 +134,7 @@ describe.skipIf(!Bun.env.TEST_DATABASE_URL)("Microsoft authentication callback (
     const { privateKey, publicKey } = await generateKeyPair("RS256");
     const jwk = await exportJWK(publicKey);
     Object.assign(jwk, { kid: "test-kid", alg: "RS256", use: "sig" });
-    const identity: Identity = {
+    let identity: Identity = {
       sub: `consumer-${crypto.randomUUID()}`,
       email: "personal@outlook.example",
       name: "Personal Account",
@@ -144,19 +145,23 @@ describe.skipIf(!Bun.env.TEST_DATABASE_URL)("Microsoft authentication callback (
       const url = String(input);
       if (url.endsWith("/oauth2/v2.0/token")) return Response.json({ token_type: "Bearer", access_token: "test-access-token", id_token: await signedIdentity(identity, privateKey), scope: "openid profile email", expires_in: 3600 });
       if (url.endsWith("/discovery/v2.0/keys")) return Response.json({ keys: [jwk] });
+      if (url.includes("graph.microsoft.com")) throw new Error("Microsoft Graph must not be called for sign-in");
       return originalFetch(input, init);
     }) as typeof fetch;
 
     try {
-      const flow = await startFlow(app);
-      const callback = await app.handle(new Request(`http://localhost/api/auth/callback/microsoft?code=consumer&state=${encodeURIComponent(flow.state)}`, { headers: { cookie: flow.cookies } }));
-      const body = await callback.text();
+      for (const code of ["consumer", "foreign-tenant"]) {
+        if (code === "foreign-tenant") identity = { ...identity, tid: "22222222-3333-4444-5555-666666666666", acct: 0 };
+        const flow = await startFlow(app);
+        const callback = await app.handle(new Request(`http://localhost/api/auth/callback/microsoft?code=${code}&state=${encodeURIComponent(flow.state)}`, { headers: { cookie: flow.cookies } }));
+        const body = await callback.text();
 
-      expect(callback.status).toBe(302);
-      expect(callback.headers.get("location")).toContain("/login/error");
-      expect(cookie(callback, "better-auth.session_token")).toBe("");
-      expect(body).not.toContain("personal@outlook.example");
-      expect(await auth.api.getSession({ headers: new Headers() })).toBeNull();
+        expect(callback.status).toBe(302);
+        expect(callback.headers.get("location")).toContain("/login/error");
+        expect(cookie(callback, "better-auth.session_token")).toBe("");
+        expect(body).not.toContain("personal@outlook.example");
+        expect(await auth.api.getSession({ headers: new Headers() })).toBeNull();
+      }
     } finally {
       globalThis.fetch = originalFetch;
       await resources.sql.close();
