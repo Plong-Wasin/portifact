@@ -188,6 +188,18 @@ describe("telemetry configuration and privacy", () => {
     expect(JSON.stringify(out)).not.toContain("access-secret");
   });
 
+  test("sanitizes camel-case sensitive assignments in error messages", () => {
+    const out = sanitizeEvent({
+      message: "authorizationHeader=Bearer-header-secret clientSecret=client-secret emailAddress=person@example.com userId=user-1 body=artifact-content",
+    });
+
+    expect(JSON.stringify(out)).not.toContain("header-secret");
+    expect(JSON.stringify(out)).not.toContain("client-secret");
+    expect(JSON.stringify(out)).not.toContain("person@example.com");
+    expect(JSON.stringify(out)).not.toContain("user-1");
+    expect(JSON.stringify(out)).not.toContain("artifact-content");
+  });
+
   test("drops an event when a serialized object remains ambiguous", () => {
     const out = sanitizeEvent({ message: String.raw`{"metadata":{"unknown":"value"}}` });
 
@@ -293,6 +305,26 @@ describe("HTTP telemetry boundaries", () => {
         correlationId: "correlation-2",
       },
     });
+  });
+
+  test("preserves an application error code and ignores error-like 4xx failures", async () => {
+    const { telemetry, events } = recordingTelemetry();
+    const app = createApp({} as never, config(), undefined, telemetry);
+    const codedError = Object.assign(new Error("database unavailable"), { code: "DATABASE_UNAVAILABLE" });
+    const expectedClientError = Object.assign(new Error("invalid state"), {
+      statusCode: 400,
+      body: { code: "INVALID_STATE" },
+    });
+    app.get("/telemetry-test-coded", () => { throw codedError; });
+    app.get("/telemetry-test-expected-error", () => { throw expectedClientError; });
+
+    const codedResponse = await app.handle(new Request("http://localhost/telemetry-test-coded"));
+    const expectedResponse = await app.handle(new Request("http://localhost/telemetry-test-expected-error"));
+
+    expect(codedResponse.status).toBe(500);
+    expect(expectedResponse.status).toBe(500);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.context?.errorCode).toBe("DATABASE_UNAVAILABLE");
   });
 
   test("captures returned 5xx responses but ignores ordinary 4xx and provider-start 502", async () => {

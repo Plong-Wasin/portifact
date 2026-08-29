@@ -4,10 +4,12 @@ import { loadConfig, type Config } from "../config";
 import { createDb } from "./client";
 import { schemaMeta } from "./schema";
 import { createErrorTelemetry, flushErrorTelemetry, type ErrorTelemetry } from "../telemetry";
+import { errorCodeOf } from "../error-utils";
 
 export async function runMigrations(config: Config, telemetry: ErrorTelemetry = createErrorTelemetry(config)) {
-  const resources = createDb(config);
+  let resources: ReturnType<typeof createDb> | undefined;
   try {
+    resources = createDb(config);
     await migrate(resources.db, { migrationsFolder: "./drizzle" });
     const [meta] = await resources.db.select().from(schemaMeta).where(eq(schemaMeta.id, 1));
     if (!meta || meta.version !== config.requiredMigrationVersion) {
@@ -15,13 +17,13 @@ export async function runMigrations(config: Config, telemetry: ErrorTelemetry = 
     }
   } catch (error) {
     try {
-      telemetry.captureException(error, { service: "migration", status: 500, errorCode: "MIGRATION_FAILED" });
+      telemetry.captureException(error, { service: "migration", status: 500, errorCode: errorCodeOf(error, "MIGRATION_FAILED") });
     } catch {
       // Telemetry must never hide the migration failure.
     }
     throw error;
   } finally {
-    await resources.sql.close();
+    await resources?.sql.close();
   }
 }
 

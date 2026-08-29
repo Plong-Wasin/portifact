@@ -10,6 +10,7 @@ import { signAccessJwt } from "./oauth/jwt";
 import { newRequestContext, requestLog } from "./logger";
 import type { Auth } from "./auth";
 import { createErrorTelemetry, flushErrorTelemetry, type ErrorTelemetry, type TelemetryContext } from "./telemetry";
+import { errorCodeOf, errorStatusOf } from "./error-utils";
 
 function requestPath(request: Request): string {
   try {
@@ -56,15 +57,6 @@ function captureExceptionFailure(telemetry: ErrorTelemetry, error: unknown, requ
   }
 }
 
-function errorCodeOf(error: unknown): string {
-  if (error && typeof error === "object") {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && code.trim()) return code.trim();
-  }
-  if (error instanceof Error && error.name !== "Error") return error.name;
-  return "INTERNAL_ERROR";
-}
-
 // Elysia .mount handlers bypass the lifecycle hooks, so requests to /mcp and
 // /api/auth are logged by wrapping the handler itself. Dashboard/health routes
 // use the onRequest/onAfterHandle hooks below.
@@ -86,8 +78,9 @@ function withLogging(route: string, handler: (request: Request) => Promise<Respo
         status = error.status;
         captureResponseFailure(telemetry, request, status, { ctx }, telemetryRoute(route, request));
       } else {
+        status = errorStatusOf(error) ?? 500;
         errorCode = errorCodeOf(error);
-        captureExceptionFailure(telemetry, error, request, status, { ctx }, errorCode, telemetryRoute(route, request));
+        if (status >= 500) captureExceptionFailure(telemetry, error, request, status, { ctx }, errorCode, telemetryRoute(route, request));
       }
       requestLog(ctx, status, Date.now() - started, errorCode);
       throw error;
@@ -126,8 +119,9 @@ export function createApp(db: Database, config: Config, auth?: Auth, telemetry: 
       captureResponseFailure(telemetry, context.request, context.error.status, state);
       return context.error;
     }
+    const errorStatus = errorStatusOf(context.error) ?? 500;
     const errorCode = errorCodeOf(context.error);
-    captureExceptionFailure(telemetry, context.error, context.request, 500, state, errorCode);
+    if (errorStatus >= 500) captureExceptionFailure(telemetry, context.error, context.request, errorStatus, state, errorCode);
     if (state) requestLog(state.ctx, 500, Date.now() - state.started, errorCode);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   });
@@ -238,34 +232,50 @@ async function rewriteAccessToken(response: Response, db: Database, config: Conf
 if (import.meta.main) {
   const config = loadConfig();
   const telemetry = createErrorTelemetry(config);
-  const resources = createDb(config);
-  const { createAuth } = await import("./auth");
-  const auth = createAuth(resources.db, config);
-  let shuttingDown = false;
-  const app = createApp(resources.db, config, auth, telemetry);
-  const server = app.listen({ hostname: "0.0.0.0", port: config.port });
-  console.log(JSON.stringify({ event: "app_started", port: config.port }));
+  let resources: ReturnType<typeof createDb> | undefined;
+  try {
+    resources = createDb(config);
+    const { createAuth } = await import("./auth");
+    const auth = createAuth(resources.db, config);
+    let shuttingDown = false;
+    const app = createApp(resources.db, config, auth, telemetry);
+    const server = app.listen({ hostname: "0.0.0.0", port: config.port });
+    console.log(JSON.stringify({ event: "app_started", port: config.port }));
 
-  async function shutdown(signal: string) {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.log(JSON.stringify({ event: "app_stopping", signal }));
-    beginDrain();
-    const deadline = Date.now() + config.shutdownTimeoutSeconds * 1000;
-    // Stop accepting new connections, let in-flight work finish, but bound it.
-    const force = new Promise<void>((resolve) => setTimeout(() => {
-      console.log(JSON.stringify({ event: "app_stop_forced" }));
-      resolve();
-    }, config.shutdownTimeoutSeconds * 1000));
-    await Promise.race([server.stop(), force]);
-    const remainingMs = Math.max(1, deadline - Date.now());
-    await Promise.all([
-      resources.sql.close(),
-      flushErrorTelemetry(telemetry, Math.min(config.sentryFlushTimeoutMs, remainingMs)),
-    ]);
-    console.log(JSON.stringify({ event: "app_stopped" }));
+    async function shutdown(signal: string) {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(JSON.stringify({ event: "app_stopping", signal }));
+      beginDrain();
+      const deadline = Date.now() + config.shutdownTimeoutSeconds * 1000;
+      // Stop accepting new connections, let in-flight work finish, but bound it.
+      const force = new Promise<void>((resolve) => setTimeout(() => {
+        console.log(JSON.stringify({ event: "app_stop_forced" }));
+        resolve();
+      }, config.shutdownTimeoutSeconds * 1000));
+      await Promise.race([server.stop(), force]);
+      const remainingMs = Math.max(1, deadline - Date.now());
+      await Promise.all([
+        resources!.sql.close(),
+        flushErrorTelemetry(telemetry, Math.min(config.sentryFlushTimeoutMs, remainingMs)),
+      ]);
+      console.log(JSON.stringify({ event: "app_stopped" }));
+    }
+
+    process.once("SIGINT", () => void shutdown("SIGINT"));
+    process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  } catch (error) {
+    try {
+      telemetry.captureException(error, { service: "app", status: 500, errorCode: errorCodeOf(error, "STARTUP_FAILED") });
+      await flushErrorTelemetry(telemetry, config.sentryFlushTimeoutMs);
+    } catch {
+      // Telemetry must never hide a startup failure.
+    }
+    try {
+      await resources?.sql.close();
+    } catch {
+      // Cleanup must never hide the original startup failure.
+    }
+    throw error;
   }
-
-  process.once("SIGINT", () => void shutdown("SIGINT"));
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
 }

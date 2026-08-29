@@ -18,6 +18,7 @@ import { idempotencyKey } from "./db/schema";
 import { publicJwks } from "./oauth/jwt";
 import { newRequestContext, requestLog, log } from "./logger";
 import { createNoopErrorTelemetry, type ErrorTelemetry } from "./telemetry";
+import { errorCodeOf, errorStatusOf } from "./error-utils";
 
 const protocolVersion = "2026-07-28";
 const scopes = ["artifacts:read", "artifacts:write", "artifacts:publish"] as const;
@@ -152,15 +153,6 @@ function requestHash(input: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(copy)).digest("hex");
 }
 
-function errorCodeOf(error: unknown): string {
-  if (error && typeof error === "object") {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && code.trim()) return code.trim();
-  }
-  if (error instanceof Error && error.name !== "Error") return error.name;
-  return "INTERNAL_ERROR";
-}
-
 type IdempotencyResult = { kind: "ok"; value: unknown } | ReturnType<typeof toolError>;
 
 async function idempotent(
@@ -215,6 +207,7 @@ async function invoke(
   tool: string,
   requiredScope: string,
   operation: () => Promise<unknown> | Promise<IdempotencyResult>,
+  telemetry: ErrorTelemetry,
 ): Promise<ReturnType<typeof toolResult> | ReturnType<typeof toolError>> {
   const started = Date.now();
   const scopeError = authScope(ctx, requiredScope);
@@ -235,6 +228,19 @@ async function invoke(
     log("tool", { correlation_id: ctx.correlationId, tool, status: "ok", duration_ms: Date.now() - started });
     return toolResult(result);
   } catch (error) {
+    if (!(error instanceof DomainError)) {
+      try {
+        telemetry.captureException(error, {
+          service: "app",
+          route: "/mcp",
+          status: 500,
+          errorCode: errorCodeOf(error),
+          correlationId: ctx.correlationId,
+        });
+      } catch {
+        // Telemetry must never change the MCP tool result.
+      }
+    }
     const errorCode = error instanceof DomainError ? error.code : "INTERNAL_ERROR";
     log("tool", { correlation_id: ctx.correlationId, tool, status: "error", error_code: errorCode, duration_ms: Date.now() - started });
     return toolError(errorCode);
@@ -264,13 +270,13 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
         const page = rows.slice(start, start + (limit ?? 50)).map(({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }) => ({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
-      }),
+      }, telemetry),
     );
 
     server.registerTool(
       "get_artifact",
       { inputSchema: z.object({ artifact_id: z.string() }) },
-      async ({ artifact_id }) => invoke(context, "get_artifact", "artifacts:read", async () => service.get(ownerId, artifact_id)),
+      async ({ artifact_id }) => invoke(context, "get_artifact", "artifacts:read", async () => service.get(ownerId, artifact_id), telemetry),
     );
 
     server.registerTool(
@@ -283,7 +289,7 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
         const page = rows.slice(start, start + (limit ?? 50)).map((version) => ({ ...version, format: artifact.format }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
-      }),
+      }, telemetry),
     );
 
     server.registerTool(
@@ -293,25 +299,25 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
         const artifact = await service.get(ownerId, artifact_id);
         const version = await service.version(ownerId, artifact_id, version_id);
         return { ...version, format: artifact.format };
-      }),
+      }, telemetry),
     );
 
     server.registerTool(
       "create_artifact",
       { inputSchema: z.object({ name: z.string(), content: z.string(), format: z.enum(ARTIFACT_FORMATS), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "create_artifact", "artifacts:write", async () => idempotent(db, config, context, "create_artifact", input, () => service.create(ownerId, input.name, input.content, input.format, "mcp"))),
+      async (input) => invoke(context, "create_artifact", "artifacts:write", async () => idempotent(db, config, context, "create_artifact", input, () => service.create(ownerId, input.name, input.content, input.format, "mcp")), telemetry),
     );
 
     server.registerTool(
       "create_version",
       { inputSchema: z.object({ artifact_id: z.string(), parent_version_id: z.string(), content: z.string(), format: z.enum(ARTIFACT_FORMATS), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "create_version", "artifacts:write", async () => idempotent(db, config, context, "create_version", input, () => service.createVersion(ownerId, input.artifact_id, input.parent_version_id, input.content, input.format))),
+      async (input) => invoke(context, "create_version", "artifacts:write", async () => idempotent(db, config, context, "create_version", input, () => service.createVersion(ownerId, input.artifact_id, input.parent_version_id, input.content, input.format)), telemetry),
     );
 
     server.registerTool(
       "publish_version",
       { inputSchema: z.object({ artifact_id: z.string(), version_id: z.string(), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "publish_version", "artifacts:publish", async () => idempotent(db, config, context, "publish_version", input, () => service.publish(ownerId, input.artifact_id, input.version_id))),
+      async (input) => invoke(context, "publish_version", "artifacts:publish", async () => idempotent(db, config, context, "publish_version", input, () => service.publish(ownerId, input.artifact_id, input.version_id)), telemetry),
     );
 
     return server;
@@ -342,19 +348,32 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
       requestLog(ctx, response.status, Date.now() - started);
       return response;
     } catch (error) {
-      try {
-        telemetry.captureException(error, {
-          service: "app",
-          route: "/mcp",
-          method: request.method,
-          status: 500,
-          errorCode: errorCodeOf(error),
-          correlationId: ctx.correlationId,
-        });
-      } catch {
-        // Telemetry must never change the MCP response.
+      const status = error instanceof Response ? error.status : errorStatusOf(error) ?? 500;
+      if (status >= 500) {
+        try {
+          if (error instanceof Response) {
+            telemetry.captureMessage(`HTTP ${status} response`, {
+              service: "app",
+              route: "/mcp",
+              method: request.method,
+              status,
+              correlationId: ctx.correlationId,
+            });
+          } else {
+            telemetry.captureException(error, {
+              service: "app",
+              route: "/mcp",
+              method: request.method,
+              status,
+              errorCode: errorCodeOf(error),
+              correlationId: ctx.correlationId,
+            });
+          }
+        } catch {
+          // Telemetry must never change the MCP response.
+        }
       }
-      requestLog(ctx, 500, Date.now() - started, errorCodeOf(error));
+      requestLog(ctx, status, Date.now() - started, error instanceof Response ? undefined : errorCodeOf(error));
       throw error;
     }
   });
