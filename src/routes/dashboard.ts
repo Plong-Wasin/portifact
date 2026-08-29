@@ -39,6 +39,159 @@ function cspNonce(): string {
   return randomBytes(16).toString("base64");
 }
 
+const APP_CSS = `
+:root {
+  color-scheme: light;
+  --canvas: #f4f7fb;
+  --surface: rgba(255, 255, 255, .92);
+  --surface-muted: #f8fafc;
+  --ink: #142033;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --primary: #5b4ce2;
+  --primary-dark: #4338ca;
+  --primary-soft: #eeecff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--canvas); }
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.6;
+  background:
+    radial-gradient(circle at 10% -5%, rgba(124, 109, 246, .2), transparent 34rem),
+    radial-gradient(circle at 100% 0%, rgba(45, 212, 191, .12), transparent 30rem),
+    var(--canvas);
+}
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, .3), transparent 45%);
+}
+.app-shell { min-height: 100vh; }
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem .5rem;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .75rem;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.brand:hover { color: var(--primary-dark); }
+.brand-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #7c6df6, #4f46e5);
+  border-radius: .75rem;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, .25);
+}
+.brand-note { color: var(--muted); font-size: .85rem; font-weight: 600; }
+.page-content { max-width: 1120px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
+main {
+  display: grid;
+  gap: 1.5rem;
+  width: min(100%, 880px);
+  margin: 1.5rem auto;
+  padding: clamp(1.25rem, 3vw, 2.25rem);
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, .8);
+  border-radius: 1.75rem;
+  box-shadow: 0 20px 60px rgba(30, 41, 59, .09), 0 2px 8px rgba(30, 41, 59, .04);
+  backdrop-filter: blur(14px);
+}
+main:has(form[action="/login/microsoft"]),
+main:has(form[action^="/api/auth/sign-in"]),
+main:has(form[action^="/api/auth/sign-up"]) { width: min(100%, 540px); }
+h1, h2, p { margin: 0; }
+h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.45rem); line-height: 1.15; letter-spacing: -.045em; }
+h2 { font-size: 1.15rem; line-height: 1.25; letter-spacing: -.02em; }
+p { color: var(--muted); }
+a { color: var(--primary-dark); font-weight: 700; text-decoration: none; transition: color .18s ease, transform .18s ease; }
+a:hover { color: var(--primary); }
+nav { display: flex; flex-wrap: wrap; gap: .55rem; padding-bottom: .25rem; }
+nav a { padding: .48rem .78rem; color: var(--muted); font-size: .9rem; border: 1px solid transparent; border-radius: .75rem; }
+nav a:hover { color: var(--primary-dark); background: var(--primary-soft); border-color: #ddd9ff; }
+form { display: grid; gap: 1rem; padding: 1.1rem; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 1.15rem; }
+form.inline { display: inline; padding: 0; background: transparent; border: 0; border-radius: 0; }
+label { display: grid; gap: .4rem; color: var(--ink); font-size: .9rem; font-weight: 750; }
+input {
+  width: 100%;
+  padding: .72rem .85rem;
+  color: var(--ink);
+  font: inherit;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: .75rem;
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+input:hover { border-color: #94a3b8; }
+input:focus { border-color: #8175ee; box-shadow: 0 0 0 4px rgba(91, 76, 226, .13); }
+input[type="file"] { padding: .55rem; background: white; border-style: dashed; }
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  min-height: 2.7rem;
+  padding: .62rem 1rem;
+  color: white;
+  font: inherit;
+  font-weight: 750;
+  background: linear-gradient(135deg, var(--primary), #7568ef);
+  border: 0;
+  border-radius: .78rem;
+  box-shadow: 0 8px 16px rgba(91, 76, 226, .2);
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+button:hover { filter: brightness(1.04); box-shadow: 0 11px 22px rgba(91, 76, 226, .27); transform: translateY(-1px); }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid rgba(45, 212, 191, .45); outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+table { width: 100%; overflow: hidden; background: white; border: 1px solid var(--line); border-radius: 1rem; border-spacing: 0; border-collapse: separate; }
+th, td { padding: .85rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: var(--surface-muted); }
+tr:last-child td { border-bottom: 0; }
+ul { display: grid; gap: .65rem; padding: 0; margin: 0; list-style: none; }
+li { padding: .9rem 1rem; background: white; border: 1px solid var(--line); border-radius: .9rem; }
+code, pre { color: #312e81; background: var(--primary-soft); border-radius: .5rem; }
+code { padding: .15rem .4rem; }
+pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
+iframe { width: 100%; min-height: 32rem; border: 1px solid var(--line); border-radius: 1rem; }
+.inline { display: inline; }
+@media (max-width: 40rem) {
+  .site-header { align-items: flex-start; padding-inline: 1rem; }
+  .brand-note { display: none; }
+  .page-content { padding: .75rem 1rem 2rem; }
+  main { margin: .75rem auto; border-radius: 1.25rem; }
+  nav { gap: .35rem; }
+  nav a { padding: .4rem .6rem; }
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+}
+`;
+
 function html(body: string, status = 200, headers = new Headers(), formActionOrigin?: string): Response {
   const nonce = cspNonce();
   const formActionSources = ["'self'", ...(formActionOrigin ? [formActionOrigin] : []), "https://login.microsoftonline.com"].join(" ");
@@ -58,7 +211,7 @@ function html(body: string, status = 200, headers = new Headers(), formActionOri
     `form-action ${formActionSources}`,
   ].join("; "));
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact</title><style nonce="${nonce}">body{font:16px system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem;color:#202124}a,button{font:inherit}main{display:grid;gap:1rem}nav{display:flex;gap:1rem;flex-wrap:wrap}label{display:grid;gap:.25rem}input{padding:.5rem}button{padding:.5rem .75rem}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ddd}.inline{display:inline}@media(max-width:40rem){body{margin:.75rem}}</style></head><body>${body}</body></html>`, { status, headers });
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact · Artifact workspace</title><style nonce="${nonce}">${APP_CSS}</style></head><body><div class="app-shell"><header class="site-header"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">P</span><span>Portifact</span></a><span class="brand-note">Artifact workspace</span></header><div class="page-content">${body}</div></div></body></html>`, { status, headers });
 }
 
 function csrfToken(request: Request): string {
