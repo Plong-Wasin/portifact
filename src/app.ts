@@ -40,6 +40,30 @@ function isProviderStartFailure(request: Request, status: number): boolean {
   return status === 502 && requestPath(request) === "/login/microsoft";
 }
 
+function microsoftCallbackErrorCode(request: Request, response: Response, config: Config, route: string): string | undefined {
+  if (route !== "/api/auth/callback/microsoft" || response.status < 300 || response.status >= 400) return undefined;
+  const location = response.headers.get("location");
+  if (!location) return undefined;
+  try {
+    const target = new URL(location, config.appUrl.origin);
+    if (target.origin !== config.appUrl.origin || !["/login/error", "/api/auth/error"].includes(target.pathname)) return undefined;
+    const error = target.searchParams.get("error");
+    return error && /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/.test(error) ? error : error ? "OAUTH_CALLBACK_ERROR" : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function captureMicrosoftCallbackFailure(telemetry: ErrorTelemetry, request: Request, response: Response, state: { ctx: ReturnType<typeof newRequestContext> } | undefined, config: Config, route?: string) {
+  const errorCode = microsoftCallbackErrorCode(request, response, config, route ?? "");
+  if (!errorCode) return;
+  try {
+    telemetry.captureMessage("Microsoft OAuth callback failed", httpTelemetryContext(request, response.status, state, errorCode, route));
+  } catch {
+    // Telemetry must never change the application response.
+  }
+}
+
 function captureResponseFailure(telemetry: ErrorTelemetry, request: Request, status: number, state?: { ctx: ReturnType<typeof newRequestContext> }, route?: string) {
   if (status < 500 || isProviderStartFailure(request, status)) return;
   try {
@@ -60,7 +84,7 @@ function captureExceptionFailure(telemetry: ErrorTelemetry, error: unknown, requ
 // Elysia .mount handlers bypass the lifecycle hooks, so requests to /mcp and
 // /api/auth are logged by wrapping the handler itself. Dashboard/health routes
 // use the onRequest/onAfterHandle hooks below.
-function withLogging(route: string, handler: (request: Request) => Promise<Response> | Response, telemetry: ErrorTelemetry) {
+function withLogging(route: string, handler: (request: Request) => Promise<Response> | Response, telemetry: ErrorTelemetry, config: Config) {
   return async (request: Request): Promise<Response> => {
     const ctx = newRequestContext(request.headers, route);
     const started = Date.now();
@@ -69,6 +93,7 @@ function withLogging(route: string, handler: (request: Request) => Promise<Respo
     try {
       const response = await handler(request);
       status = response.status;
+      captureMicrosoftCallbackFailure(telemetry, request, response, { ctx }, config, telemetryRoute(route, request));
       captureResponseFailure(telemetry, request, status, { ctx }, telemetryRoute(route, request));
       const out = new Response(response.body, response);
       if (!request.headers.has("x-correlation-id")) out.headers.set("x-correlation-id", ctx.correlationId);
@@ -111,7 +136,7 @@ export function createApp(db: Database, config: Config, auth?: Auth, telemetry: 
       set.headers["x-correlation-id"] = state.ctx.correlationId;
     }
   });
-  if (auth) app.mount("/api/auth", withLogging("api_auth", (request) => authHandlerRef(auth, request, db, config), telemetry));
+  if (auth) app.mount("/api/auth", withLogging("api_auth", (request) => authHandlerRef(auth, request, db, config), telemetry, config));
   return app.onError((context) => {
     const state = (context.store as Record<string, { ctx: ReturnType<typeof newRequestContext>; started: number }> | undefined)?.__req;
     if (context.error instanceof Response) {

@@ -29,14 +29,15 @@ type Identity = {
 };
 
 async function signedIdentity(identity: Identity, privateKey: CryptoKey) {
-  return new SignJWT({
+  const claims: Record<string, unknown> = {
     tid: identity.tid ?? tenantId,
-    acct: identity.acct ?? 0,
     preferred_username: identity.email,
     email: identity.email,
     name: identity.name,
     email_verified: true,
-  })
+  };
+  if (identity.acct !== undefined) claims.acct = identity.acct;
+  return new SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid: "test-kid" })
     .setIssuer(`https://login.microsoftonline.com/${identity.tid ?? tenantId}/v2.0`)
     .setAudience(clientId)

@@ -342,6 +342,39 @@ describe("HTTP telemetry boundaries", () => {
     expect(events[0]).toMatchObject({ kind: "message", value: "HTTP 500 response" });
   });
 
+  test("captures a Microsoft callback error redirect without exposing OAuth parameters", async () => {
+    const { telemetry, events } = recordingTelemetry();
+    const auth = {
+      handler: async () => Response.redirect("http://localhost/login/error?error=unable_to_get_user_info&code=secret&state=secret", 302),
+      api: {},
+    } as never;
+    const app = createApp({} as never, config({
+      MICROSOFT_CLIENT_ID: "client-id",
+      MICROSOFT_CLIENT_SECRET: "client-secret",
+      MICROSOFT_TENANT_ID: "11111111-2222-3333-4444-555555555555",
+    }), auth, telemetry);
+
+    const response = await app.handle(new Request("http://localhost/api/auth/callback/microsoft?code=secret&state=secret", {
+      headers: { "x-correlation-id": "correlation-oauth" },
+    }));
+
+    expect(response.status).toBe(302);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "message",
+      value: "Microsoft OAuth callback failed",
+      context: {
+        service: "app",
+        route: "/api/auth/callback/microsoft",
+        method: "GET",
+        status: 302,
+        errorCode: "unable_to_get_user_info",
+        correlationId: "correlation-oauth",
+      },
+    });
+    expect(JSON.stringify(events[0])).not.toContain("secret");
+  });
+
   test("captures an exception from the mounted Better Auth boundary", async () => {
     const { telemetry, events } = recordingTelemetry();
     const auth = {

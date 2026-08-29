@@ -11,6 +11,29 @@ export type Auth = ReturnType<typeof createAuth>;
 
 const microsoftAuthority = "https://login.microsoftonline.com";
 
+export function microsoftUserFromClaims(claims: Record<string, unknown>, tenantId: string) {
+  // Microsoft emits acct only when it is configured as an optional claim. A
+  // value of 1 explicitly identifies a guest; an omitted claim is normal for
+  // managed-user ID tokens and must not make sign-in fail.
+  const accountType = claims.acct;
+  if (claims.tid !== tenantId || (accountType !== undefined && accountType !== 0)) return null;
+  const id = typeof claims.sub === "string" ? claims.sub : "";
+  const email = typeof claims.email === "string"
+    ? claims.email
+    : typeof claims.preferred_username === "string" ? claims.preferred_username : "";
+  if (!id || !email) return null;
+  const name = typeof claims.name === "string" && claims.name.trim() ? claims.name : email;
+  return {
+    user: {
+      id,
+      name,
+      email,
+      emailVerified: claims.email_verified === true,
+    },
+    data: claims,
+  };
+}
+
 export function createAuth(db: Database, config: Config) {
   const microsoft = config.microsoft;
   return betterAuth({
@@ -66,22 +89,7 @@ export function createAuth(db: Database, config: Config) {
           } catch {
             return null;
           }
-          if (claims.tid !== microsoft.tenantId || claims.acct !== 0) return null;
-          const id = typeof claims.sub === "string" ? claims.sub : "";
-          const email = typeof claims.email === "string"
-            ? claims.email
-            : typeof claims.preferred_username === "string" ? claims.preferred_username : "";
-          if (!id || !email) return null;
-          const name = typeof claims.name === "string" && claims.name.trim() ? claims.name : email;
-          return {
-            user: {
-              id,
-              name,
-              email,
-              emailVerified: claims.email_verified === true,
-            },
-            data: claims,
-          };
+          return microsoftUserFromClaims(claims, microsoft.tenantId);
         },
       },
     } : undefined,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
-import { createAuth } from "../src/auth";
+import { createAuth, microsoftUserFromClaims } from "../src/auth";
 import { config } from "./helpers";
 
 const noDatabase = {} as never;
@@ -11,6 +11,29 @@ const microsoftEnv = {
 };
 
 describe("Microsoft login page", () => {
+  test("accepts a managed user when the optional acct claim is omitted", () => {
+    const userInfo = microsoftUserFromClaims({
+      tid: microsoftEnv.MICROSOFT_TENANT_ID,
+      sub: "subject-1",
+      preferred_username: "person@example.com",
+      name: "Person Example",
+    }, microsoftEnv.MICROSOFT_TENANT_ID);
+
+    expect(userInfo?.user.id).toBe("subject-1");
+    expect(userInfo?.user.email).toBe("person@example.com");
+  });
+
+  test("rejects a guest when Microsoft marks acct as 1", () => {
+    const userInfo = microsoftUserFromClaims({
+      tid: microsoftEnv.MICROSOFT_TENANT_ID,
+      acct: 1,
+      sub: "guest-1",
+      preferred_username: "guest@example.com",
+    }, microsoftEnv.MICROSOFT_TENANT_ID);
+
+    expect(userInfo).toBeNull();
+  });
+
   test("offers Microsoft sign-in when Microsoft is configured", async () => {
     const appConfig = config(microsoftEnv);
     const response = await createApp(noDatabase, appConfig).handle(new Request("http://localhost/login"));
