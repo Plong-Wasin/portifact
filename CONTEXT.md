@@ -39,3 +39,17 @@ _Avoid_: Rendered content
 **Mermaid diagram**:
 A diagram declared with Mermaid syntax inside a document artifact.
 _Avoid_: Diagram attachment, image artifact
+
+## Identity language
+
+**Organization**:
+The single administrative boundary served by one Portifact deployment.
+_Avoid_: Tenant, workspace (when referring to the whole deployment)
+
+**Internal user**:
+A person authenticated as a member of the Organization.
+_Avoid_: Company user, employee (unless employment status is relevant)
+
+**Microsoft identity**:
+The organization-managed identity used by an Internal user to sign in to Portifact.
+_Avoid_: Microsoft account (when a personal Microsoft account is not allowed)

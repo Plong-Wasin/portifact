@@ -1,0 +1,124 @@
+import { describe, expect, test } from "bun:test";
+import { createApp } from "../src/app";
+import { createAuth } from "../src/auth";
+import { config } from "./helpers";
+
+const noDatabase = {} as never;
+const microsoftEnv = {
+  MICROSOFT_CLIENT_ID: "client-id",
+  MICROSOFT_CLIENT_SECRET: "client-secret",
+  MICROSOFT_TENANT_ID: "11111111-2222-3333-4444-555555555555",
+};
+
+describe("Microsoft login page", () => {
+  test("offers Microsoft sign-in when Microsoft is configured", async () => {
+    const appConfig = config(microsoftEnv);
+    const response = await createApp(noDatabase, appConfig).handle(new Request("http://localhost/login"));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("Sign in with Microsoft");
+    expect(body).toContain("/login/microsoft");
+    expect(body).not.toContain("/api/auth/sign-in/email");
+    expect(body).not.toContain('name="password"');
+    expect(body).toContain('name="csrf"');
+    expect(body).toContain("Only a Microsoft identity from your configured Organization is accepted");
+  });
+
+  test("keeps the local login form when Microsoft is not configured", async () => {
+    const response = await createApp(noDatabase, config()).handle(new Request("http://localhost/login"));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("/api/auth/sign-in/email");
+    expect(body).not.toContain("Sign in with Microsoft");
+  });
+
+  test("hides registration when Microsoft mode is enabled", async () => {
+    const appConfig = config({
+      ...microsoftEnv,
+      REGISTRATION_ENABLED: "true",
+    });
+    const response = await createApp(noDatabase, appConfig).handle(new Request("http://localhost/register"));
+
+    expect(response.status).toBe(404);
+  });
+
+  test("starts the Microsoft flow from the browser form", async () => {
+    const appConfig = config(microsoftEnv);
+    const auth = createAuth(noDatabase, appConfig);
+    const app = createApp(noDatabase, appConfig, auth);
+    const login = await app.handle(new Request("http://localhost/login"));
+    const body = await login.text();
+    const csrf = body.match(/name="csrf" value="([^"]+)"/)?.[1];
+
+    const response = await app.handle(new Request("http://localhost/login/microsoft", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: (login.headers.get("set-cookie") ?? "").split(";", 1)[0],
+        origin: "http://localhost",
+      },
+      body: new URLSearchParams({ csrf: csrf ?? "" }),
+    }));
+
+    expect(response.status).toBe(303);
+    const location = new URL(response.headers.get("location") ?? "http://invalid");
+    expect(location.origin).toBe("https://login.microsoftonline.com");
+    expect(location.pathname).toBe("/11111111-2222-3333-4444-555555555555/oauth2/v2.0/authorize");
+    expect(location.searchParams.get("scope")).toBe("openid profile email");
+    expect(location.searchParams.get("redirect_uri")).toBe("http://localhost/api/auth/callback/microsoft");
+    expect(response.headers.get("set-cookie")).toContain("oauth_state");
+  });
+
+  test("preserves an MCP authorization request through login", async () => {
+    const appConfig = config(microsoftEnv);
+    const query = new URLSearchParams({
+      client_id: "mcp-client",
+      redirect_uri: "https://mcp.example/callback",
+      response_type: "code",
+      state: "mcp-state",
+    });
+    const response = await createApp(noDatabase, appConfig).handle(new Request(`http://localhost/login?${query}`));
+    const body = await response.text();
+
+    expect(body).toContain('name="callbackURL"');
+    expect(body).toContain("/api/auth/mcp/authorize?client_id=mcp-client&amp;redirect_uri=https%3A%2F%2Fmcp.example%2Fcallback");
+  });
+
+  test("shows a generic retry page for a failed Microsoft flow", async () => {
+    const response = await createApp(noDatabase, config(microsoftEnv)).handle(new Request("http://localhost/login/error?error=invalid_code&code=secret"));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("Sign-in failed");
+    expect(body).toContain("Try again");
+    expect(body).not.toContain("invalid_code");
+    expect(body).not.toContain("secret");
+  });
+
+  test("does not expose password authentication in Microsoft mode", async () => {
+    const appConfig = config(microsoftEnv);
+    const auth = createAuth(noDatabase, appConfig);
+    const app = createApp(noDatabase, appConfig, auth);
+
+    for (const path of ["/api/auth/sign-in/email", "/api/auth/sign-up/email"]) {
+      const response = await app.handle(new Request(`http://localhost${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "person@example.com", password: "password123", name: "Person" }),
+      }));
+      expect(response.status).toBe(400);
+    }
+  });
+
+  test("sends an invalid callback to the generic retry page", async () => {
+    const appConfig = config(microsoftEnv);
+    const auth = createAuth(noDatabase, appConfig);
+    const app = createApp(noDatabase, appConfig, auth);
+    const response = await app.handle(new Request("http://localhost/api/auth/callback/microsoft?code=secret&state=invalid"));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("http://localhost/login/error?error=state_mismatch");
+  });
+});

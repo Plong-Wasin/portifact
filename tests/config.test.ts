@@ -17,6 +17,47 @@ describe("loadConfig", () => {
     expect(config.registrationEnabled).toBe(false);
     expect(config.maxContentBytes).toBe(1048576);
     expect(config.requiredMigrationVersion).toBe(7);
+    expect(config.microsoft).toBeUndefined();
+  });
+
+  test("loads Microsoft configuration when all credentials are supplied", () => {
+    const config = loadConfig({
+      ...base,
+      MICROSOFT_CLIENT_ID: "client-id",
+      MICROSOFT_CLIENT_SECRET: "client-secret",
+      MICROSOFT_TENANT_ID: "11111111-2222-3333-4444-555555555555",
+    });
+    expect(config.microsoft).toEqual({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      tenantId: "11111111-2222-3333-4444-555555555555",
+    });
+  });
+
+  test("requires complete Microsoft configuration in production", () => {
+    const production = {
+      ...base,
+      APP_ENV: "production",
+      APP_URL: "https://portifact.example.com",
+      SHARE_LINK_ENCRYPTION_KEY: "share-link-secret",
+      MICROSOFT_CLIENT_ID: "client-id",
+      MICROSOFT_CLIENT_SECRET: "client-secret",
+      MICROSOFT_TENANT_ID: "11111111-2222-3333-4444-555555555555",
+    };
+    expect(loadConfig(production).microsoft).toBeDefined();
+    expect(() => loadConfig({ ...production, MICROSOFT_CLIENT_ID: "" })).toThrow("MICROSOFT_CLIENT_ID");
+    expect(() => loadConfig({ ...production, MICROSOFT_CLIENT_SECRET: "" })).toThrow("MICROSOFT_CLIENT_SECRET");
+    expect(() => loadConfig({ ...production, MICROSOFT_TENANT_ID: "" })).toThrow("MICROSOFT_TENANT_ID");
+  });
+
+  test("accepts only a concrete Microsoft tenant ID", () => {
+    const env = {
+      ...base,
+      MICROSOFT_CLIENT_ID: "client-id",
+      MICROSOFT_CLIENT_SECRET: "client-secret",
+      MICROSOFT_TENANT_ID: "common",
+    };
+    expect(() => loadConfig(env)).toThrow("MICROSOFT_TENANT_ID");
   });
 
   test("rejects ambiguous booleans", () => {

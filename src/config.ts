@@ -37,6 +37,26 @@ function appHost(url: URL): string {
   return url.hostname.toLowerCase();
 }
 
+function microsoftConfig(env: Record<string, string | undefined>, isProduction: boolean) {
+  const clientId = env.MICROSOFT_CLIENT_ID?.trim() || undefined;
+  const clientSecret = env.MICROSOFT_CLIENT_SECRET?.trim() || undefined;
+  const tenantId = env.MICROSOFT_TENANT_ID?.trim() || undefined;
+  const normalizedTenantId = tenantId?.toLowerCase();
+  const supplied = [clientId, clientSecret, tenantId].filter(Boolean).length;
+
+  if (isProduction && !clientId) throw new Error("MICROSOFT_CLIENT_ID is required in production");
+  if (supplied > 0 && !clientId) throw new Error("MICROSOFT_CLIENT_ID must be configured with Microsoft login");
+  if (supplied > 0 && !clientSecret) throw new Error("MICROSOFT_CLIENT_SECRET must be configured with Microsoft login");
+  if (supplied > 0 && !tenantId) throw new Error("MICROSOFT_TENANT_ID must be configured with Microsoft login");
+  if (isProduction && !clientSecret) throw new Error("MICROSOFT_CLIENT_SECRET is required in production");
+  if (isProduction && !tenantId) throw new Error("MICROSOFT_TENANT_ID is required in production");
+  if (normalizedTenantId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(normalizedTenantId)) {
+    throw new Error("MICROSOFT_TENANT_ID must be a tenant GUID");
+  }
+
+  return clientId && clientSecret && normalizedTenantId ? { clientId, clientSecret, tenantId: normalizedTenantId } : undefined;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
   const appEnv = env.APP_ENV?.trim() || "development";
   const rawAppUrl = required("APP_URL", env.APP_URL);
@@ -61,6 +81,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
     if (appEnv === "production") throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in production");
     if (parsedAppUrl.hostname !== "localhost") throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
   }
+  const microsoft = microsoftConfig(env, appEnv === "production");
 
   return {
     appEnv,
@@ -80,6 +101,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
     shareLinkEncryptionKey,
     logLevel: logLevel as "debug" | "info" | "warn" | "error",
     betterAuthSecret,
+    microsoft,
     requiredMigrationVersion: 7,
     readyDbTimeoutMs: integer("READY_DB_TIMEOUT_MS", env.READY_DB_TIMEOUT_MS?.trim() || "2000", 100),
     shutdownTimeoutSeconds: integer("SHUTDOWN_TIMEOUT_SECONDS", env.SHUTDOWN_TIMEOUT_SECONDS?.trim() || "10", 1),

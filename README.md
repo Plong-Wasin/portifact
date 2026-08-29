@@ -57,6 +57,10 @@ Follow the prompts. Enable public registration only when needed:
 REGISTRATION_ENABLED=true
 ```
 
+When Microsoft login is configured, the first successful sign-in provisions the
+user automatically. The password form, public registration, and CLI-created
+password accounts are not part of the normal Microsoft login flow.
+
 ## Development
 
 Install Bun dependencies locally:
@@ -112,6 +116,33 @@ See `.env.example` for all settings. Important limits include:
 - `SOFT_DELETE_RETENTION_DAYS`: delay before deleted artifacts are purged
 - `ACCESS_TOKEN_TTL_SECONDS`: MCP access-token lifetime
 - `IDEMPOTENCY_TTL_SECONDS`: idempotency replay window
+
+### Microsoft Entra login
+
+For a company deployment, register a Microsoft Entra web application with the
+account type **Accounts in this organizational directory only**. Register this
+exact redirect URI, derived from `APP_URL`:
+
+```text
+https://your-public-host.example.com/api/auth/callback/microsoft
+```
+
+Set these values through deployment secrets/configuration:
+
+```dotenv
+MICROSOFT_CLIENT_ID=<application-client-id>
+MICROSOFT_CLIENT_SECRET=<application-client-secret>
+MICROSOFT_TENANT_ID=<organization-tenant-guid>
+```
+
+To exclude guest identities as well as consumer identities, add the
+optional `acct` claim to the application's ID token. Portifact accepts only
+`acct=0` (a member of the configured tenant). Tokens from another tenant,
+consumer accounts, guest identities, or tokens without the required member
+claim are rejected. Keep the client secret out of source control and logs.
+
+Portifact requests only the `openid`, `profile`, and `email` identity scopes;
+it does not request Microsoft Graph Mail permissions or send email.
 
 ## MCP
 

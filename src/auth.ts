@@ -1,24 +1,93 @@
 import { betterAuth } from "better-auth";
 import { admin, jwt, mcp } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { getMicrosoftPublicKey } from "better-auth/social-providers";
+import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { Database } from "./db/client";
 import type { Config } from "./config";
 import * as schema from "./db/schema";
 
 export type Auth = ReturnType<typeof createAuth>;
 
+const microsoftAuthority = "https://login.microsoftonline.com";
+
 export function createAuth(db: Database, config: Config) {
+  const microsoft = config.microsoft;
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema }),
     baseURL: config.appUrl.toString(),
     secret: config.betterAuthSecret,
+    logger: {
+      level: config.logLevel,
+      // Better Auth sometimes passes provider errors as extra arguments. Keep
+      // those out of application logs because they may contain OAuth material.
+      log: (level, message) => {
+        const line = JSON.stringify({ event: "auth", level, message: typeof message === "string" ? message : "authentication event" });
+        if (level === "error") console.error(line);
+        else console.log(line);
+      },
+    },
+    onAPIError: {
+      errorURL: `${config.appUrl.origin}/login/error`,
+    },
     emailAndPassword: {
-      enabled: true,
+      enabled: !microsoft,
       disableSignUp: !config.registrationEnabled,
       autoSignIn: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
     },
+    account: {
+      accountLinking: {
+        disableImplicitLinking: true,
+      },
+      encryptOAuthTokens: true,
+      storeStateStrategy: "cookie",
+    },
+    socialProviders: microsoft ? {
+      microsoft: {
+        clientId: microsoft.clientId,
+        clientSecret: microsoft.clientSecret,
+        tenantId: microsoft.tenantId,
+        disableDefaultScope: true,
+        scope: ["openid", "profile", "email"],
+        disableProfilePhoto: true,
+        getUserInfo: async (token) => {
+          if (!token.idToken) return null;
+          let claims: Record<string, unknown>;
+          try {
+            const { kid, alg } = decodeProtectedHeader(token.idToken);
+            if (!kid || alg !== "RS256") return null;
+            const publicKey = await getMicrosoftPublicKey(kid, microsoft.tenantId, microsoftAuthority);
+            const verified = await jwtVerify(token.idToken, publicKey, {
+              algorithms: ["RS256"],
+              audience: microsoft.clientId,
+              issuer: `${microsoftAuthority}/${microsoft.tenantId}/v2.0`,
+              maxTokenAge: "1h",
+            });
+            claims = verified.payload;
+          } catch {
+            return null;
+          }
+          if (claims.tid !== microsoft.tenantId || claims.acct !== 0) return null;
+          const id = typeof claims.sub === "string" ? claims.sub : "";
+          const email = typeof claims.email === "string"
+            ? claims.email
+            : typeof claims.preferred_username === "string" ? claims.preferred_username : "";
+          if (!id || !email) return null;
+          const name = typeof claims.name === "string" && claims.name.trim() ? claims.name : email;
+          return {
+            user: {
+              id,
+              name,
+              email,
+              emailVerified: claims.email_verified === true,
+            },
+            data: claims,
+          };
+        },
+      },
+    } : undefined,
     plugins: [
       admin(),
       jwt({

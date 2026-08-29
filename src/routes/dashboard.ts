@@ -71,11 +71,45 @@ function sessionRedirect(request: Request, location: string) {
   return new Response(null, { status: 302, headers: { Location: `${new URL(location, request.url)}` } });
 }
 
-function withCsrf(response: Response, request: Request) {
+function withCsrf(response: Response, request: Request, token = cookies(request)[csrfCookie] ?? crypto.randomUUID()) {
   if (cookies(request)[csrfCookie]) return response;
-  const token = crypto.randomUUID();
   response.headers.append("Set-Cookie", `${csrfCookie}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; HttpOnly`);
   return response;
+}
+
+async function startMicrosoftLogin(request: Request, auth: Auth, config: Config): Promise<Response> {
+  await verifyMutation(request, config);
+  const form = await request.clone().formData();
+  const callbackValue = form.get("callbackURL");
+  const callbackURL = typeof callbackValue === "string" && callbackValue ? callbackValue : "/artifacts";
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  const response = await auth.handler(new Request(new URL("/api/auth/sign-in/social", request.url), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      provider: "microsoft",
+      callbackURL,
+      errorCallbackURL: "/login/error",
+    }),
+  }));
+  const location = response.headers.get("location");
+  if (!response.ok || !location) return new Response("Unable to start sign-in", { status: 502 });
+  const redirectHeaders = new Headers({ Location: location });
+  const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  const setCookies = getSetCookie ? getSetCookie.call(response.headers) : [];
+  if (setCookies.length) {
+    for (const cookie of setCookies) redirectHeaders.append("Set-Cookie", cookie);
+  } else {
+    const setCookie = response.headers.get("set-cookie");
+    if (setCookie) redirectHeaders.set("Set-Cookie", setCookie);
+  }
+  return new Response(null, { status: 303, headers: redirectHeaders });
+}
+
+function loginErrorPage(): Response {
+  return html('<main><h1>Sign-in failed</h1><p>We could not complete sign-in. Please try again.</p><a href="/login">Try again</a></main>');
 }
 
 export function sourcePage(body: string): Response {
@@ -112,8 +146,24 @@ export function previewSandbox(format: ArtifactFormat): string {
 export function registerDashboardRoutes(app: any, db: Database, config: Config, auth?: Auth) {
   const service = new ArtifactService(db, config);
   app.get("/", async ({ request }: { request: Request }) => sessionRedirect(request, (await sessionUser(auth, request)) ? "/artifacts" : "/login"));
-  app.get("/login", ({ request }: { request: Request }) => withCsrf(html(`<main><h1>Sign in</h1><form method="post" action="/api/auth/sign-in/email"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>${config.registrationEnabled ? '<a href="/register">Create an account</a>' : ""}</main>`), request));
-  app.get("/register", ({ request }: { request: Request }) => config.registrationEnabled ? withCsrf(html(`<main><h1>Create account</h1><form method="post" action="/api/auth/sign-up/email"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button>Create account</button></form><a href="/login">Sign in</a></main>`), request) : new Response("Not Found", { status: 404 }));
+  app.get("/login", ({ request }: { request: Request }) => {
+    const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+    const loginURL = new URL(request.url);
+    const callbackURL = loginURL.searchParams.has("client_id") && loginURL.searchParams.has("redirect_uri")
+      ? `/api/auth/mcp/authorize${loginURL.search}`
+      : "/artifacts";
+    const body = config.microsoft
+      ? `<main><h1>Sign in</h1><p>Only a Microsoft identity from your configured Organization is accepted. Personal identities and identities outside the Organization are not supported.</p><form method="post" action="/login/microsoft"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><input type="hidden" name="callbackURL" value="${escapeHtml(callbackURL)}"><button type="submit">Sign in with Microsoft</button></form></main>`
+      : `<main><h1>Sign in</h1><form method="post" action="/api/auth/sign-in/email"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>${config.registrationEnabled ? '<a href="/register">Create an account</a>' : ""}</main>`;
+    return withCsrf(html(body), request, token);
+  });
+  app.get("/error", loginErrorPage);
+  app.post("/login/microsoft", async ({ request }: { request: Request }) => {
+    if (!auth || !config.microsoft) return new Response("Not Found", { status: 404 });
+    return startMicrosoftLogin(request, auth, config);
+  });
+  app.get("/login/error", loginErrorPage);
+  app.get("/register", ({ request }: { request: Request }) => config.registrationEnabled && !config.microsoft ? withCsrf(html(`<main><h1>Create account</h1><form method="post" action="/api/auth/sign-up/email"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button>Create account</button></form><a href="/login">Sign in</a></main>`), request) : new Response("Not Found", { status: 404 }));
   app.get("/account", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
     return user ? html(`<main><h1>Account</h1><p>${escapeHtml(user.name)} — ${escapeHtml(user.email)} (email unverified)</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`) : sessionRedirect(request, "/login");
