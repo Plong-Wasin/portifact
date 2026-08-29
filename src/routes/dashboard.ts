@@ -125,7 +125,30 @@ main {
 main:has(form[action="/login/microsoft"]),
 main:has(form[action^="/api/auth/sign-in"]),
 main:has(form[action^="/api/auth/sign-up"]) { width: min(100%, 540px); }
-.preview-page { width: min(100%, 1080px); }
+.preview-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: 100%;
+  height: calc(100vh - 3.5rem);
+  min-height: calc(100vh - 3.5rem);
+  margin: 0;
+  padding: 1rem clamp(1rem, 3vw, 2rem) 1.25rem;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body:has(main.preview-page) .page-content { max-width: none; padding: 0; }
+body:has(main.preview-page) .site-header {
+  max-width: none;
+  padding: .6rem clamp(1rem, 3vw, 2rem);
+  background: rgba(255, 255, 255, .72);
+  border-bottom: 1px solid rgba(226, 232, 240, .9);
+  box-shadow: 0 4px 18px rgba(30, 41, 59, .05);
+  backdrop-filter: blur(14px);
+}
 h1, h2, p { margin: 0; }
 h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.45rem); line-height: 1.15; letter-spacing: -.045em; }
 h2 { font-size: 1.15rem; line-height: 1.25; letter-spacing: -.02em; }
@@ -140,6 +163,8 @@ nav a:hover { color: var(--primary-dark); background: var(--primary-soft); borde
 .section-heading { margin-top: .25rem; }
 .share-links, .preview-warning, .result-link { display: grid; gap: .8rem; }
 .preview-warning { padding: .85rem 1rem; color: #854d0e; background: #fffbeb; border: 1px solid #fde68a; border-radius: .9rem; }
+.preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); }
+.preview-toolbar h1 { font-size: clamp(1.15rem, 2.5vw, 1.6rem); letter-spacing: -.03em; }
 .preview-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 .preview-actions a { color: var(--muted); }
 form { display: grid; gap: 1rem; padding: 1.1rem; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 1.15rem; }
@@ -209,7 +234,7 @@ li { padding: .9rem 1rem; background: white; border: 1px solid var(--line); bord
 .share-link-controls button { flex: 0 0 auto; }
 .result-link { padding: 1rem; background: var(--primary-soft); border: 1px solid #ddd9ff; border-radius: 1rem; }
 .result-link .share-url { margin: 0; }
-.artifact-frame { width: 100%; height: min(76vh, 52rem); min-height: 32rem; border: 1px solid var(--line); border-radius: 1rem; }
+.artifact-frame { width: 100%; height: 100%; min-height: 0; border: 1px solid var(--line); border-radius: 1rem; background: white; }
 .copy-buffer { position: fixed; inset: -1000px; width: 1px; height: 1px; opacity: 0; }
 code, pre { color: #312e81; background: var(--primary-soft); border-radius: .5rem; }
 code { padding: .15rem .4rem; }
@@ -220,6 +245,8 @@ pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
   .brand-note { display: none; }
   .page-content { padding: .75rem 1rem 2rem; }
   main { margin: .75rem auto; border-radius: 1.25rem; }
+  main.preview-page { height: calc(100vh - 3.25rem); min-height: calc(100vh - 3.25rem); margin: 0; padding: .75rem; border-radius: 0; }
+  .preview-toolbar { align-items: flex-start; flex-direction: column; gap: .65rem; }
   nav { gap: .35rem; }
   nav a { padding: .4rem .6rem; }
   table { min-width: 720px; }
@@ -384,11 +411,12 @@ function absoluteShareUrl(config: Config, path: string): string {
 }
 
 function renderShareLinkHistory(links: ShareLinkInfo[], config: Config, published: boolean): string {
-  if (!links.length) return "";
-  return `<section class="share-links"><div class="section-heading"><div><p class="eyebrow">Sharing</p><h2>Share links</h2></div><p>${links.length} link${links.length === 1 ? "" : "s"}</p></div><p>Current and previous links are kept here for reference. Revoked links can be copied but no longer open the artifact.</p><ul class="share-link-list">${links.map((link) => {
+  const visibleLinks = links.filter((link) => !link.revokedAt);
+  if (!visibleLinks.length) return "";
+  return `<section class="share-links"><div class="section-heading"><div><p class="eyebrow">Sharing</p><h2>Share link</h2></div><p>${visibleLinks.length} active link</p></div><p>Copy this link to share the published artifact.</p><ul class="share-link-list">${visibleLinks.map((link) => {
     const url = absoluteShareUrl(config, link.url);
-    const status = link.revokedAt ? "Revoked" : published ? "Active" : "Unpublished";
-    const statusClass = link.revokedAt ? "revoked" : published ? "active" : "unpublished";
+    const status = published ? "Active" : "Unpublished";
+    const statusClass = published ? "active" : "unpublished";
     return `<li class="share-link-item ${statusClass}"><div class="share-link-meta"><span class="share-status ${statusClass}">${status}</span><time class="share-link-date" datetime="${link.createdAt.toISOString()}">${link.createdAt.toISOString()}</time></div><code class="share-url">${escapeHtml(url)}</code><div class="share-link-controls"><button type="button" data-copy-url="${escapeHtml(url)}">Copy link</button></div></li>`;
   }).join("")}</ul></section>`;
 }
@@ -402,7 +430,7 @@ function renderVersionTable(artifactId: string, versions: Array<{ id: string; or
 }
 
 function previewPageBody(title: string, sourceHref: string, backHref: string, frameSrc: string, sandbox: string): string {
-  return `<main class="preview-page"><div class="preview-heading"><div><p class="eyebrow">Artifact preview</p><h1>${escapeHtml(title)}</h1></div><span class="share-status active">Read-only</span></div><div class="preview-warning" role="status"><strong>Untrusted content:</strong> This artifact was created by a user. Never enter passwords or sensitive information.</div><div class="preview-actions"><a href="${escapeHtml(sourceHref)}">View source</a><a href="${escapeHtml(backHref)}">Back to artifact</a></div><iframe class="artifact-frame" ${sandbox} src="${escapeHtml(frameSrc)}" title="Artifact preview"></iframe></main>`;
+  return `<main class="preview-page"><div class="preview-toolbar"><div class="preview-heading"><div><p class="eyebrow">Artifact preview</p><h1>${escapeHtml(title)}</h1></div><span class="share-status active">Read-only</span></div><div class="preview-actions"><a href="${escapeHtml(sourceHref)}">View source</a><a href="${escapeHtml(backHref)}">Back to artifact</a></div></div><div class="preview-warning" role="status"><strong>Untrusted content:</strong> This artifact was created by a user. Never enter passwords or sensitive information.</div><iframe class="artifact-frame" ${sandbox} src="${escapeHtml(frameSrc)}" title="Artifact preview"></iframe></main>`;
 }
 
 function shareLinkResultPage(title: string, message: string, url: string, backHref: string): string {

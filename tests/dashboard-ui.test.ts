@@ -54,7 +54,7 @@ function requestHeaders() {
 }
 
 describe("dashboard artifact UI", () => {
-  test("keeps long version digests inside the versions card and shows copyable link history", async () => {
+  test("keeps long version digests inside the versions card and shows only the current share link", async () => {
     const originalGet = ArtifactService.prototype.get;
     const originalVersionsMeta = ArtifactService.prototype.versionsMeta;
     const originalShareLinks = (ArtifactService.prototype as any).shareLinks;
@@ -70,9 +70,10 @@ describe("dashboard artifact UI", () => {
       expect(body).toContain('class="table-wrap"');
       expect(body).toContain('class="digest"');
       expect(body).toContain("overflow-wrap: anywhere");
-      expect(body).toContain("http://localhost/s/old-token");
-      expect(body).toContain('data-copy-url="http://localhost/s/old-token"');
-      expect(body).toContain("Revoked");
+      expect(body).toContain("http://localhost/s/active-token");
+      expect(body).toContain('data-copy-url="http://localhost/s/active-token"');
+      expect(body).not.toContain("http://localhost/s/old-token");
+      expect(body).not.toContain("Revoked");
     } finally {
       ArtifactService.prototype.get = originalGet;
       ArtifactService.prototype.versionsMeta = originalVersionsMeta;
@@ -97,7 +98,9 @@ describe("dashboard artifact UI", () => {
 
       expect(privatePreview.status).toBe(200);
       expect(privateBody).toContain('class="brand-mark"');
+      expect(privateBody).toContain('class="preview-toolbar"');
       expect(privateBody).toContain('class="artifact-frame"');
+      expect(privateBody).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
       expect(privateBody).not.toContain('style="width:100%;height:80vh"');
       expect(publicPreview.status).toBe(200);
       expect(publicBody).toContain('class="brand-mark"');
