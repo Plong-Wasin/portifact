@@ -18,6 +18,27 @@ describe("loadConfig", () => {
     expect(config.maxContentBytes).toBe(1048576);
     expect(config.requiredMigrationVersion).toBe(7);
     expect(config.microsoft).toBeUndefined();
+    expect(config.sentryDsn).toBeUndefined();
+    expect(config.sentryRelease).toBeUndefined();
+    expect(config.sentryFlushTimeoutMs).toBe(2000);
+  });
+
+  test("loads optional telemetry settings and bounds its flush timeout", () => {
+    const config = loadConfig({
+      ...base,
+      SHUTDOWN_TIMEOUT_SECONDS: "3",
+      SENTRY_DSN: " https://public@example.com/42 ",
+      SENTRY_RELEASE: " release-abc ",
+      SENTRY_FLUSH_TIMEOUT_MS: "5000",
+    });
+
+    expect(config.sentryDsn).toBe("https://public@example.com/42");
+    expect(config.sentryRelease).toBe("release-abc");
+    expect(config.sentryFlushTimeoutMs).toBe(3000);
+  });
+
+  test("rejects a non-positive telemetry flush timeout", () => {
+    expect(() => loadConfig({ ...base, SENTRY_FLUSH_TIMEOUT_MS: "0" })).toThrow("SENTRY_FLUSH_TIMEOUT_MS");
   });
 
   test("loads Microsoft configuration when all credentials are supplied", () => {

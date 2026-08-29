@@ -119,6 +119,36 @@ See `.env.example` for all settings. Important limits include:
 - `SOFT_DELETE_RETENTION_DAYS`: delay before deleted artifacts are purged
 - `ACCESS_TOKEN_TTL_SECONDS`: MCP access-token lifetime
 - `IDEMPOTENCY_TTL_SECONDS`: idempotency replay window
+- `SENTRY_DSN`: optional Sentry-compatible DSN for GlitchTip error telemetry;
+  blank disables outbound telemetry
+- `SENTRY_RELEASE`: optional release identifier shown on telemetry events
+- `SENTRY_FLUSH_TIMEOUT_MS`: maximum time used to flush telemetry during shutdown
+
+### Optional GlitchTip error telemetry
+
+Portifact can send sanitized server-side errors to a GlitchTip project through
+its Sentry-compatible DSN. Set `SENTRY_DSN` in the deployment environment; leave
+it blank for local or isolated deployments. A malformed DSN or unavailable
+GlitchTip endpoint does not stop the app, worker, migration, or authentication
+flow. `APP_ENV` separates environments, and `SENTRY_RELEASE` can identify an
+explicit deployed release.
+
+Events contain only the service, path, method, status, application error code,
+environment, optional release, correlation ID, exception type, and sanitized
+message/stack. Cookies, authorization headers, bodies, query strings, OAuth
+codes/state/tokens, Microsoft identity claims, email addresses, user context,
+and artifact content are excluded. Telemetry supplements structured logs and
+does not change `LOG_LEVEL` behavior.
+
+To verify a DSN manually, run the opt-in smoke command from the app image. It
+requires both a configured DSN and an explicit confirmation flag, and sends one
+event only:
+
+```sh
+docker compose run --rm -e SENTRY_SMOKE_TEST=true app bun run telemetry:smoke
+```
+
+The command is not an HTTP endpoint and is not run by the default test suite.
 
 ### Microsoft Entra login
 

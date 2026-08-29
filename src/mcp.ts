@@ -17,6 +17,7 @@ import { ARTIFACT_FORMATS } from "./artifacts/content";
 import { idempotencyKey } from "./db/schema";
 import { publicJwks } from "./oauth/jwt";
 import { newRequestContext, requestLog, log } from "./logger";
+import { createNoopErrorTelemetry, type ErrorTelemetry } from "./telemetry";
 
 const protocolVersion = "2026-07-28";
 const scopes = ["artifacts:read", "artifacts:write", "artifacts:publish"] as const;
@@ -151,6 +152,15 @@ function requestHash(input: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(copy)).digest("hex");
 }
 
+function errorCodeOf(error: unknown): string {
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim()) return code.trim();
+  }
+  if (error instanceof Error && error.name !== "Error") return error.name;
+  return "INTERNAL_ERROR";
+}
+
 type IdempotencyResult = { kind: "ok"; value: unknown } | ReturnType<typeof toolError>;
 
 async function idempotent(
@@ -231,7 +241,7 @@ async function invoke(
   }
 }
 
-export function registerMcp(app: any, db: Database, config: Config, auth?: Auth) {
+export function registerMcp(app: any, db: Database, config: Config, auth?: Auth, telemetry: ErrorTelemetry = createNoopErrorTelemetry()) {
   const service = new ArtifactService(db, config);
   const verifier = authVerifier(auth, config);
   const gate = requireBearerAuth({
@@ -316,10 +326,35 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth)
       const result = await gate(request);
       if (result instanceof Response) { requestLog(ctx, result.status, Date.now() - started, "UNAUTHORIZED"); return result; }
       const response = await mcp.fetch(request, { authInfo: result });
+      if (response.status >= 500) {
+        try {
+          telemetry.captureMessage(`HTTP ${response.status} response`, {
+            service: "app",
+            route: "/mcp",
+            method: request.method,
+            status: response.status,
+            correlationId: ctx.correlationId,
+          });
+        } catch {
+          // Telemetry must never change the MCP response.
+        }
+      }
       requestLog(ctx, response.status, Date.now() - started);
       return response;
     } catch (error) {
-      requestLog(ctx, 500, Date.now() - started, error instanceof Error ? error.name : "INTERNAL_ERROR");
+      try {
+        telemetry.captureException(error, {
+          service: "app",
+          route: "/mcp",
+          method: request.method,
+          status: 500,
+          errorCode: errorCodeOf(error),
+          correlationId: ctx.correlationId,
+        });
+      } catch {
+        // Telemetry must never change the MCP response.
+      }
+      requestLog(ctx, 500, Date.now() - started, errorCodeOf(error));
       throw error;
     }
   });

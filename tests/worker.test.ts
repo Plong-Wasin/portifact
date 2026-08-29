@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { tick } from "../src/jobs/worker";
+import { runWorkerLoop, tick } from "../src/jobs/worker";
+import type { ErrorTelemetry, TelemetryContext } from "../src/telemetry";
+
+function recordingTelemetry() {
+  const events: Array<{ kind: "exception" | "message"; value: unknown; context?: TelemetryContext }> = [];
+  const telemetry: ErrorTelemetry = {
+    isEnabled: () => false,
+    captureException(value, context) { events.push({ kind: "exception", value, context }); },
+    captureMessage(value, context) { events.push({ kind: "message", value, context }); },
+    flush: async () => true,
+  };
+  return { telemetry, events };
+}
 
 // Fake DB for the worker tick: returns configurable job rows and records
 // side effects so we can assert claim/run/fail behaviour without PostgreSQL.
@@ -37,5 +49,53 @@ describe("worker tick", () => {
     await tick(fakeDb([jobRow], records) as never);
     // update (claim) then delete (run) both touched.
     expect(records.updates.length + records.deletes.length).toBeGreaterThan(0);
+  });
+
+  test("keeps retryable job failures in logs without creating telemetry events", async () => {
+    const records = { deletes: [], updates: [] };
+    const { telemetry, events } = recordingTelemetry();
+    const jobRow = {
+      id: "j2", kind: "unknown", artifactId: null, status: "pending",
+      scheduledAt: new Date(0), attempts: 1, lockedAt: null, lastError: null,
+      createdAt: new Date(0), updatedAt: new Date(0),
+    };
+
+    await tick(fakeDb([jobRow], records) as never, telemetry);
+
+    expect(events).toHaveLength(0);
+  });
+
+  test("reports a job only after it becomes dead", async () => {
+    const records = { deletes: [], updates: [] };
+    const { telemetry, events } = recordingTelemetry();
+    const jobRow = {
+      id: "j3", kind: "unknown", artifactId: null, status: "pending",
+      scheduledAt: new Date(0), attempts: 5, lockedAt: null, lastError: null,
+      createdAt: new Date(0), updatedAt: new Date(0),
+    };
+
+    await tick(fakeDb([jobRow], records) as never, telemetry);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "exception",
+      context: { service: "worker", errorCode: "JOB_DEAD", status: 500 },
+    });
+  });
+
+  test("reports a worker loop failure", async () => {
+    const { telemetry, events } = recordingTelemetry();
+    let checks = 0;
+    const db = {
+      select: () => { throw new Error("worker database unavailable"); },
+    } as never;
+
+    await runWorkerLoop(db, () => ++checks > 1, telemetry);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "exception",
+      context: { service: "worker", errorCode: "TICK_ERROR", status: 500 },
+    });
   });
 });

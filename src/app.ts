@@ -9,11 +9,66 @@ import { beginDrain } from "./runtime";
 import { signAccessJwt } from "./oauth/jwt";
 import { newRequestContext, requestLog } from "./logger";
 import type { Auth } from "./auth";
+import { createErrorTelemetry, flushErrorTelemetry, type ErrorTelemetry, type TelemetryContext } from "./telemetry";
+
+function requestPath(request: Request): string {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    return "/unknown";
+  }
+}
+
+function telemetryRoute(route: string, request: Request): string {
+  const path = requestPath(request);
+  return route === "api_auth" && !path.startsWith("/api/auth") ? `/api/auth${path}` : path;
+}
+
+function httpTelemetryContext(request: Request, status: number, state?: { ctx: ReturnType<typeof newRequestContext> }, errorCode?: string, route?: string): TelemetryContext {
+  return {
+    service: "app",
+    route: route ?? requestPath(request),
+    method: request.method,
+    status,
+    errorCode,
+    correlationId: state?.ctx.correlationId ?? newRequestContext(request.headers).correlationId,
+  };
+}
+
+function isProviderStartFailure(request: Request, status: number): boolean {
+  return status === 502 && requestPath(request) === "/login/microsoft";
+}
+
+function captureResponseFailure(telemetry: ErrorTelemetry, request: Request, status: number, state?: { ctx: ReturnType<typeof newRequestContext> }, route?: string) {
+  if (status < 500 || isProviderStartFailure(request, status)) return;
+  try {
+    telemetry.captureMessage(`HTTP ${status} response`, httpTelemetryContext(request, status, state, undefined, route));
+  } catch {
+    // Telemetry must never change the application response.
+  }
+}
+
+function captureExceptionFailure(telemetry: ErrorTelemetry, error: unknown, request: Request, status: number, state?: { ctx: ReturnType<typeof newRequestContext> }, errorCode?: string, route?: string) {
+  try {
+    telemetry.captureException(error, httpTelemetryContext(request, status, state, errorCode, route));
+  } catch {
+    // Telemetry must never change the application response.
+  }
+}
+
+function errorCodeOf(error: unknown): string {
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim()) return code.trim();
+  }
+  if (error instanceof Error && error.name !== "Error") return error.name;
+  return "INTERNAL_ERROR";
+}
 
 // Elysia .mount handlers bypass the lifecycle hooks, so requests to /mcp and
 // /api/auth are logged by wrapping the handler itself. Dashboard/health routes
 // use the onRequest/onAfterHandle hooks below.
-function withLogging(route: string, handler: (request: Request) => Promise<Response> | Response) {
+function withLogging(route: string, handler: (request: Request) => Promise<Response> | Response, telemetry: ErrorTelemetry) {
   return async (request: Request): Promise<Response> => {
     const ctx = newRequestContext(request.headers, route);
     const started = Date.now();
@@ -22,11 +77,18 @@ function withLogging(route: string, handler: (request: Request) => Promise<Respo
     try {
       const response = await handler(request);
       status = response.status;
+      captureResponseFailure(telemetry, request, status, { ctx }, telemetryRoute(route, request));
       const out = new Response(response.body, response);
       if (!request.headers.has("x-correlation-id")) out.headers.set("x-correlation-id", ctx.correlationId);
       return out;
     } catch (error) {
-      errorCode = error instanceof Error ? error.name : "INTERNAL_ERROR";
+      if (error instanceof Response) {
+        status = error.status;
+        captureResponseFailure(telemetry, request, status, { ctx }, telemetryRoute(route, request));
+      } else {
+        errorCode = errorCodeOf(error);
+        captureExceptionFailure(telemetry, error, request, status, { ctx }, errorCode, telemetryRoute(route, request));
+      }
       requestLog(ctx, status, Date.now() - started, errorCode);
       throw error;
     } finally {
@@ -35,32 +97,38 @@ function withLogging(route: string, handler: (request: Request) => Promise<Respo
   };
 }
 
-export function createApp(db: Database, config: Config, auth?: Auth) {
+export function createApp(db: Database, config: Config, auth?: Auth, telemetry: ErrorTelemetry = createErrorTelemetry(config)) {
   const app = registerHealthRoutes(db, config);
   registerDashboardRoutes(app, db, config, auth);
-  registerMcp(app, db, config, auth);
+  registerMcp(app, db, config, auth, telemetry);
   registerAccessJwks(app, config);
   app.onRequest(({ request, store }) => {
     const ctx = newRequestContext(request.headers, new URL(request.url).pathname);
     (store as Record<string, unknown>).__req = { ctx, started: Date.now() };
   });
-  app.onAfterHandle(({ request, store, set }) => {
+  app.onAfterHandle((context) => {
+    const { request, store, set } = context;
     const state = (store as Record<string, { ctx: ReturnType<typeof newRequestContext>; started: number }> | undefined)?.__req;
     if (!state) return;
     const status = typeof set.status === "number" ? set.status : 200;
     requestLog(state.ctx, status, Date.now() - state.started);
+    const response = context.response instanceof Response ? context.response : undefined;
+    captureResponseFailure(telemetry, request, response?.status ?? status, state);
     if (!request.headers.has("x-correlation-id")) {
       set.headers["x-correlation-id"] = state.ctx.correlationId;
     }
   });
-  if (auth) app.mount("/api/auth", withLogging("api_auth", (request) => authHandlerRef(auth, request, db, config)));
+  if (auth) app.mount("/api/auth", withLogging("api_auth", (request) => authHandlerRef(auth, request, db, config), telemetry));
   return app.onError((context) => {
     const state = (context.store as Record<string, { ctx: ReturnType<typeof newRequestContext>; started: number }> | undefined)?.__req;
     if (context.error instanceof Response) {
       if (state) requestLog(state.ctx, context.error.status, Date.now() - state.started);
+      captureResponseFailure(telemetry, context.request, context.error.status, state);
       return context.error;
     }
-    if (state) requestLog(state.ctx, 500, Date.now() - state.started, "INTERNAL_ERROR");
+    const errorCode = errorCodeOf(context.error);
+    captureExceptionFailure(telemetry, context.error, context.request, 500, state, errorCode);
+    if (state) requestLog(state.ctx, 500, Date.now() - state.started, errorCode);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   });
 }
@@ -169,11 +237,12 @@ async function rewriteAccessToken(response: Response, db: Database, config: Conf
 
 if (import.meta.main) {
   const config = loadConfig();
+  const telemetry = createErrorTelemetry(config);
   const resources = createDb(config);
   const { createAuth } = await import("./auth");
   const auth = createAuth(resources.db, config);
   let shuttingDown = false;
-  const app = createApp(resources.db, config, auth);
+  const app = createApp(resources.db, config, auth, telemetry);
   const server = app.listen({ hostname: "0.0.0.0", port: config.port });
   console.log(JSON.stringify({ event: "app_started", port: config.port }));
 
@@ -182,13 +251,18 @@ if (import.meta.main) {
     shuttingDown = true;
     console.log(JSON.stringify({ event: "app_stopping", signal }));
     beginDrain();
+    const deadline = Date.now() + config.shutdownTimeoutSeconds * 1000;
     // Stop accepting new connections, let in-flight work finish, but bound it.
     const force = new Promise<void>((resolve) => setTimeout(() => {
       console.log(JSON.stringify({ event: "app_stop_forced" }));
       resolve();
     }, config.shutdownTimeoutSeconds * 1000));
     await Promise.race([server.stop(), force]);
-    await resources.sql.close();
+    const remainingMs = Math.max(1, deadline - Date.now());
+    await Promise.all([
+      resources.sql.close(),
+      flushErrorTelemetry(telemetry, Math.min(config.sentryFlushTimeoutMs, remainingMs)),
+    ]);
     console.log(JSON.stringify({ event: "app_stopped" }));
   }
 

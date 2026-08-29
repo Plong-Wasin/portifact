@@ -3,6 +3,7 @@ import type { Database } from "../db/client";
 import type { Config } from "../config";
 import { artifact, job } from "../db/schema";
 import { log } from "../logger";
+import { createNoopErrorTelemetry, type ErrorTelemetry } from "../telemetry";
 
 export const JOB_LEASE_SECONDS = 60;
 export const MAX_ATTEMPTS = 5;
@@ -41,7 +42,7 @@ async function runJob(db: Database, row: typeof job.$inferSelect): Promise<void>
   throw new Error(`unknown job kind: ${row.kind}`);
 }
 
-async function failJob(db: Database, row: typeof job.$inferSelect, message: string): Promise<void> {
+async function failJob(db: Database, row: typeof job.$inferSelect, message: string): Promise<boolean> {
   const dead = row.attempts >= MAX_ATTEMPTS;
   await db.update(job).set({
     status: dead ? "dead" : "pending",
@@ -50,9 +51,10 @@ async function failJob(db: Database, row: typeof job.$inferSelect, message: stri
     scheduledAt: new Date(Date.now() + Math.min(row.attempts, 10) * 30_000),
     updatedAt: new Date(),
   }).where(eq(job.id, row.id));
+  return dead;
 }
 
-export async function tick(db: Database): Promise<void> {
+export async function tick(db: Database, telemetry: ErrorTelemetry = createNoopErrorTelemetry()): Promise<void> {
   const claimed = await claimJob(db, new Date());
   if (!claimed) return;
   try {
@@ -60,16 +62,28 @@ export async function tick(db: Database): Promise<void> {
     log("job_completed", { job_id: claimed.id, kind: claimed.kind });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await failJob(db, claimed, message);
+    const dead = await failJob(db, claimed, message);
+    if (dead) {
+      try {
+        telemetry.captureException(error, { service: "worker", status: 500, errorCode: "JOB_DEAD" });
+      } catch {
+        // Telemetry must never alter job state or worker availability.
+      }
+    }
     log("job_failed", { job_id: claimed.id, kind: claimed.kind, error: message.slice(0, 200) });
   }
 }
 
 // Runs until `shouldStop()` returns true. Each iteration claims at most one job,
 // so a stop signal is honoured between jobs. A pending tick finishes before exit.
-export async function runWorkerLoop(db: Database, shouldStop: () => boolean): Promise<void> {
+export async function runWorkerLoop(db: Database, shouldStop: () => boolean, telemetry: ErrorTelemetry = createNoopErrorTelemetry()): Promise<void> {
   while (!shouldStop()) {
-    await tick(db).catch((error) => {
+    await tick(db, telemetry).catch((error) => {
+      try {
+        telemetry.captureException(error, { service: "worker", status: 500, errorCode: "TICK_ERROR" });
+      } catch {
+        // Telemetry must never alter worker control flow.
+      }
       log("tick_error", { error: String(error).slice(0, 200) }, "error");
     });
     if (shouldStop()) break;

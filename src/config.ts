@@ -69,6 +69,8 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
   const retentionDays = integer("SOFT_DELETE_RETENTION_DAYS", env.SOFT_DELETE_RETENTION_DAYS?.trim() || "30", 1);
   const accessTokenTtlSeconds = integer("ACCESS_TOKEN_TTL_SECONDS", env.ACCESS_TOKEN_TTL_SECONDS?.trim() || "900", 60);
   const idempotencyTtlSeconds = integer("IDEMPOTENCY_TTL_SECONDS", env.IDEMPOTENCY_TTL_SECONDS?.trim() || "86400", 60);
+  const shutdownTimeoutSeconds = integer("SHUTDOWN_TIMEOUT_SECONDS", env.SHUTDOWN_TIMEOUT_SECONDS?.trim() || "10", 1);
+  const requestedSentryFlushTimeoutMs = integer("SENTRY_FLUSH_TIMEOUT_MS", env.SENTRY_FLUSH_TIMEOUT_MS?.trim() || "2000", 1);
   const shareLinkEncryptionKey = required("SHARE_LINK_ENCRYPTION_KEY", env.SHARE_LINK_ENCRYPTION_KEY || (appEnv !== "production" && parsedAppUrl.hostname === "localhost" ? "local-share-link-key" : undefined));
   const logLevel = env.LOG_LEVEL?.trim() || "info";
   if (!["debug", "info", "warn", "error"].includes(logLevel)) throw new Error("LOG_LEVEL must be debug, info, warn, or error");
@@ -104,7 +106,10 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
     microsoft,
     requiredMigrationVersion: 7,
     readyDbTimeoutMs: integer("READY_DB_TIMEOUT_MS", env.READY_DB_TIMEOUT_MS?.trim() || "2000", 100),
-    shutdownTimeoutSeconds: integer("SHUTDOWN_TIMEOUT_SECONDS", env.SHUTDOWN_TIMEOUT_SECONDS?.trim() || "10", 1),
+    shutdownTimeoutSeconds,
+    sentryDsn: env.SENTRY_DSN?.trim() || undefined,
+    sentryRelease: env.SENTRY_RELEASE?.trim() || undefined,
+    sentryFlushTimeoutMs: Math.min(requestedSentryFlushTimeoutMs, shutdownTimeoutSeconds * 1000),
     accessTokenKeyId: env.ACCESS_TOKEN_KEY_ID?.trim() || "portifact-access-v1",
   } as const;
 }
