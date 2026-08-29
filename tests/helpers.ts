@@ -1,6 +1,8 @@
 import { loadConfig } from "../src/config";
 import type { Config } from "../src/config";
 
+export const TEST_AUTH_SECRET = "test-secret-must-be-at-least-32-characters-long-aaaa";
+
 // Complete env fixture for tests. Includes every required variable so a test
 // only overrides what it cares about. BETTER_AUTH_SECRET is long enough to
 // pass the non-localhost length gate when a test points APP_URL elsewhere.
@@ -19,7 +21,7 @@ export function env(overrides: Record<string, string> = {}): Record<string, stri
     IDEMPOTENCY_TTL_SECONDS: "86400",
     SHARE_LINK_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     LOG_LEVEL: "warn",
-    BETTER_AUTH_SECRET: "test-secret-must-be-at-least-32-characters-long-aaaa",
+    BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     ...overrides,
   };
 }

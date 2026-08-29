@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { TEST_AUTH_SECRET } from "./helpers";
 
 describe("migration foundation", () => {
   test("ships an initial migration and journal", () => {
@@ -20,6 +21,7 @@ describe("migration foundation", () => {
       TRUST_PROXY: "false",
       DATABASE_URL: Bun.env.TEST_DATABASE_URL,
       REGISTRATION_ENABLED: "false",
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     });
     await runMigrations(config);
   });

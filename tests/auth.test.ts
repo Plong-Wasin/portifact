@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config";
+import { TEST_AUTH_SECRET } from "./helpers";
 
 const baseEnv = {
   APP_ENV: "test",
@@ -7,7 +8,7 @@ const baseEnv = {
   PORT: "3000",
   TRUST_PROXY: "false",
   REGISTRATION_ENABLED: "false",
-  BETTER_AUTH_SECRET: "test-secret-must-be-at-least-32-characters-long",
+  BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
 };
 
 function config(overrides: Record<string, string> = {}) {

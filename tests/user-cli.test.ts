@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TEST_AUTH_SECRET } from "./helpers";
 
 describe.skipIf(!Bun.env.TEST_DATABASE_URL)("user cli (needs TEST_DATABASE_URL)", () => {
   test("createUser then reset-password invalidates the prior session", async () => {
@@ -12,7 +13,7 @@ describe.skipIf(!Bun.env.TEST_DATABASE_URL)("user cli (needs TEST_DATABASE_URL)"
       TRUST_PROXY: "false",
       DATABASE_URL: Bun.env.TEST_DATABASE_URL!,
       REGISTRATION_ENABLED: "true",
-      BETTER_AUTH_SECRET: "test-secret-must-be-at-least-32-characters-long",
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     });
     const resources = createDb(config);
     const auth = createAuth(resources.db, config);

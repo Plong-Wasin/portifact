@@ -16,7 +16,7 @@ cp .env.example .env
 Set these values in `.env` before starting:
 
 - `BETTER_AUTH_SECRET`: random value, at least 32 characters
-- `SHARE_LINK_ENCRYPTION_KEY`: 32-byte base64 key
+- `SHARE_LINK_ENCRYPTION_KEY`: random value, at least 32 characters
 - `POSTGRES_PASSWORD`: database password
 - `DATABASE_URL`: use the same database credentials, for example:
   `postgresql://portifact:<password>@postgres:5432/portifact`
@@ -43,9 +43,11 @@ docker compose ps
 docker compose logs -f app
 ```
 
-## Create a user
+## Create a local password user
 
-Registration is disabled by default. Create the first account from the CLI:
+This step is only for local/password mode, when the `MICROSOFT_*` settings are
+empty. Registration is disabled by default. Create the first account from the
+CLI:
 
 ```sh
 docker compose run --rm app bun run user:create
@@ -57,9 +59,10 @@ Follow the prompts. Enable public registration only when needed:
 REGISTRATION_ENABLED=true
 ```
 
-When Microsoft login is configured, the first successful sign-in provisions the
-user automatically. The password form, public registration, and CLI-created
-password accounts are not part of the normal Microsoft login flow.
+When Microsoft login is configured, skip this step: the first successful
+Microsoft sign-in provisions the user automatically. The password form, public
+registration, and CLI-created password accounts are not part of that login
+flow, and `REGISTRATION_ENABLED` has no effect in Microsoft mode.
 
 ## Development
 
@@ -119,9 +122,10 @@ See `.env.example` for all settings. Important limits include:
 
 ### Microsoft Entra login
 
-For a company deployment, register a Microsoft Entra web application with the
-account type **Accounts in this organizational directory only**. Register this
-exact redirect URI, derived from `APP_URL`:
+For a company deployment, set `APP_ENV=production` and `APP_URL` to the public
+HTTPS origin. Register a Microsoft Entra web application with the account type
+**Accounts in this organizational directory only**. Register this exact
+redirect URI, derived from `APP_URL`:
 
 ```text
 https://your-public-host.example.com/api/auth/callback/microsoft
@@ -148,4 +152,4 @@ it does not request Microsoft Graph Mail permissions or send email.
 
 The MCP endpoint is available at `/mcp`. OAuth discovery and protected-resource metadata are exposed under `/.well-known/`.
 
-Use HTTPS and a trusted reverse proxy in production. Set `APP_URL` to the public HTTPS URL and configure `APP_HOST` to its hostname.
+Use HTTPS and a trusted reverse proxy in production. Set `APP_URL` to the public HTTPS URL. If you deploy the included nginx configuration, also set `APP_HOST` to its hostname.
