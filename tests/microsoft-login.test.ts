@@ -23,6 +23,7 @@ describe("Microsoft login page", () => {
     expect(body).not.toContain('name="password"');
     expect(body).toContain('name="csrf"');
     expect(body).toContain("Only a Microsoft identity from your configured Organization is accepted");
+    expect(response.headers.get("content-security-policy")).toContain("form-action 'self' https://login.microsoftonline.com");
   });
 
   test("keeps the local login form when Microsoft is not configured", async () => {

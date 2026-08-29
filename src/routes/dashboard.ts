@@ -38,7 +38,9 @@ function cookies(request: Request): Record<string, string> {
 function html(body: string, status = 200, headers = new Headers()): Response {
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  // The local POST starts OAuth and redirects the browser to Microsoft's
+  // authorization host. Keep form submissions same-origin otherwise.
+  headers.set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://login.microsoftonline.com");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact</title><style>body{font:16px system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem;color:#202124}a,button{font:inherit}main{display:grid;gap:1rem}nav{display:flex;gap:1rem;flex-wrap:wrap}label{display:grid;gap:.25rem}input{padding:.5rem}button{padding:.5rem .75rem}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ddd}@media(max-width:40rem){body{margin:.75rem}}</style></head><body>${body}</body></html>`, { status, headers });
 }
