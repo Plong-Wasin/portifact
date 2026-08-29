@@ -35,6 +35,11 @@ describe.skipIf(!DSN)("share lifecycle", () => {
       const pub2 = await service.rotate(ownerId, created.artifact.id);
       expect(pub2.token).not.toBe(pub1.token);
 
+      const history = await service.shareLinks(ownerId, created.artifact.id);
+      expect(history.map((link) => link.token)).toEqual([pub2.token, pub1.token]);
+      expect(history[0]?.revokedAt).toBeNull();
+      expect(history[1]?.revokedAt).toBeInstanceOf(Date);
+
       await expect(service.shared(pub1.token)).rejects.toThrow(); // revoked
       const shared2 = await service.shared(pub2.token);
       expect(shared2.version.id).toBe(version.id);

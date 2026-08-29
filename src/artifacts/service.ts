@@ -13,6 +13,15 @@ export type ArtifactMetadata = Omit<typeof artifact.$inferSelect, "latestVersion
   publishedVersionId: string | null;
 };
 
+export type ShareLinkInfo = {
+  id: string;
+  artifactId: string;
+  token: string;
+  url: string;
+  revokedAt: Date | null;
+  createdAt: Date;
+};
+
 export function metadata(row: typeof artifact.$inferSelect): ArtifactMetadata {
   return row;
 }
@@ -48,6 +57,21 @@ export class ArtifactService {
       ordinal: artifactVersion.ordinal, byteSize: artifactVersion.byteSize, digest: artifactVersion.digest,
       source: artifactVersion.source, creatorId: artifactVersion.creatorId, createdAt: artifactVersion.createdAt,
     }).from(artifactVersion).where(eq(artifactVersion.artifactId, artifactId)).orderBy(asc(artifactVersion.ordinal));
+  }
+
+  async shareLinks(ownerId: string, artifactId: string): Promise<ShareLinkInfo[]> {
+    await this.get(ownerId, artifactId);
+    const rows = await this.db.select({
+      id: shareLink.id,
+      artifactId: shareLink.artifactId,
+      encryptedToken: shareLink.encryptedToken,
+      revokedAt: shareLink.revokedAt,
+      createdAt: shareLink.createdAt,
+    }).from(shareLink).where(eq(shareLink.artifactId, artifactId)).orderBy(desc(shareLink.createdAt));
+    return rows.map((row) => {
+      const token = decryptToken(row.encryptedToken, this.config.shareLinkEncryptionKey);
+      return { id: row.id, artifactId: row.artifactId, token, url: `/s/${token}`, revokedAt: row.revokedAt, createdAt: row.createdAt };
+    });
   }
 
   async version(ownerId: string, artifactId: string, versionId: string, includeDeleted = false) {
