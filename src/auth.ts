@@ -1,8 +1,7 @@
 import { betterAuth } from "better-auth";
 import { admin, jwt, mcp } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { getMicrosoftPublicKey } from "better-auth/social-providers";
-import { decodeProtectedHeader, jwtVerify } from "jose";
+import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from "jose";
 import type { Database } from "./db/client";
 import type { Config } from "./config";
 import * as schema from "./db/schema";
@@ -10,6 +9,23 @@ import * as schema from "./db/schema";
 export type Auth = ReturnType<typeof createAuth>;
 
 const microsoftAuthority = "https://login.microsoftonline.com";
+
+type MicrosoftJwks = { keys?: JWK[] };
+
+export function microsoftJwkAlgorithm(_jwk: JWK): "RS256" {
+  // The callback verifier only accepts RS256. Microsoft currently omits alg
+  // from these RSA JWKS entries, so supply the algorithm required by jose.
+  return "RS256";
+}
+
+async function getMicrosoftSigningKey(kid: string, tenantId: string): Promise<CryptoKey> {
+  const response = await fetch(`${microsoftAuthority}/${tenantId}/discovery/v2.0/keys`);
+  if (!response.ok) throw new Error("Microsoft signing keys unavailable");
+  const body = await response.json() as MicrosoftJwks;
+  const jwk = body.keys?.find((key) => key.kid === kid);
+  if (!jwk) throw new Error("Microsoft signing key not found");
+  return await importJWK(jwk, microsoftJwkAlgorithm(jwk)) as CryptoKey;
+}
 
 export type MicrosoftUserInfoFailureReason =
   | "missing_id_token"
@@ -115,7 +131,7 @@ export function createAuth(db: Database, config: Config, options: AuthOptions = 
               reportMicrosoftUserInfoFailure(options.onMicrosoftUserInfoFailure, "invalid_id_token_header");
               return null;
             }
-            const publicKey = await getMicrosoftPublicKey(kid, microsoft.tenantId, microsoftAuthority);
+            const publicKey = await getMicrosoftSigningKey(kid, microsoft.tenantId);
             const verified = await jwtVerify(token.idToken, publicKey, {
               algorithms: ["RS256"],
               audience: microsoft.clientId,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
-import { createAuth, microsoftUserFromClaims } from "../src/auth";
+import { createAuth, microsoftJwkAlgorithm, microsoftUserFromClaims } from "../src/auth";
 import { config } from "./helpers";
 
 const noDatabase = {} as never;
@@ -11,6 +11,10 @@ const microsoftEnv = {
 };
 
 describe("Microsoft login page", () => {
+  test("uses RS256 when Microsoft's JWKS omits alg", () => {
+    expect(microsoftJwkAlgorithm({ kty: "RSA", n: "modulus", e: "AQAB" })).toBe("RS256");
+  });
+
   test("accepts a managed user when the optional acct claim is omitted", () => {
     const userInfo = microsoftUserFromClaims({
       tid: microsoftEnv.MICROSOFT_TENANT_ID,
