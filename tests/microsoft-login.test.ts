@@ -78,6 +78,14 @@ describe("Microsoft login page", () => {
     expect(body).not.toContain("Sign in with Microsoft");
   });
 
+  test("uses the configured public origin for redirects behind a proxy", async () => {
+    const appConfig = config({ APP_URL: "https://portifact.terodigital.com" });
+    const response = await createApp(noDatabase, appConfig).handle(new Request("http://app:3000/"));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://portifact.terodigital.com/login");
+  });
+
   test("hides registration when Microsoft mode is enabled", async () => {
     const appConfig = config({
       ...microsoftEnv,

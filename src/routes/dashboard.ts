@@ -85,8 +85,8 @@ async function sessionUser(auth: Auth | undefined, request: Request) {
   return session?.user ?? null;
 }
 
-function sessionRedirect(request: Request, location: string) {
-  return new Response(null, { status: 302, headers: { Location: `${new URL(location, request.url)}` } });
+function sessionRedirect(config: Config, location: string) {
+  return new Response(null, { status: 302, headers: { Location: `${new URL(location, config.appUrl.origin)}` } });
 }
 
 function withCsrf(response: Response, request: Request, token = cookies(request)[csrfCookie] ?? crypto.randomUUID()) {
@@ -164,7 +164,7 @@ export function previewSandbox(format: ArtifactFormat): string {
 export function registerDashboardRoutes(app: any, db: Database, config: Config, auth?: Auth) {
   const service = new ArtifactService(db, config);
   const page = (body: string, status = 200, headers = new Headers()) => html(body, status, headers, config.appUrl.origin);
-  app.get("/", async ({ request }: { request: Request }) => sessionRedirect(request, (await sessionUser(auth, request)) ? "/artifacts" : "/login"));
+  app.get("/", async ({ request }: { request: Request }) => sessionRedirect(config, (await sessionUser(auth, request)) ? "/artifacts" : "/login"));
   app.get("/login", ({ request }: { request: Request }) => {
     const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
     const loginURL = new URL(request.url);
@@ -185,27 +185,27 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/register", ({ request }: { request: Request }) => config.registrationEnabled && !config.microsoft ? withCsrf(page(`<main><h1>Create account</h1><form method="post" action="/api/auth/sign-up/email"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button>Create account</button></form><a href="/login">Sign in</a></main>`), request) : new Response("Not Found", { status: 404 }));
   app.get("/account", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const identityStatus = config.microsoft ? "Microsoft identity authenticated" : user.emailVerified ? "email verified" : "email unverified";
     return page(`<main><h1>Account</h1><p>${escapeHtml(user.name)} — ${escapeHtml(user.email)} (${identityStatus})</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`);
   });
   app.post("/logout", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
     if (auth) await auth.api.signOut({ headers: request.headers });
-    return sessionRedirect(request, "/login");
+    return sessionRedirect(config, "/login");
   });
   app.get("/artifacts", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const rows = await service.list(user.id);
     const token = cookies(request)[csrfCookie] ?? "";
     return withCsrf(page(`<main><nav><a href="/account">Account</a><a href="/artifacts/new">New artifact</a><a href="/trash">Trash</a><a href="/connections">Connections</a></nav><h1>Your artifacts</h1><ul>${rows.map((row) => `<li><a href="/artifacts/${row.id}">${escapeHtml(row.name)}</a> — ${row.publishedVersionId ? "published" : "private"}</li>`).join("") || "<li>No artifacts yet.</li>"}</ul><p data-csrf="${escapeHtml(token)}"></p></main>`), request);
   });
-  app.get("/artifacts/new", async ({ request }: { request: Request }) => (await sessionUser(auth, request)) ? withCsrf(page(`<main><h1>Upload artifact</h1><p>Supported files: .html, .md, and .txt. Files are private until you publish them.</p><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>Artifact file<input name="file" type="file" accept=".html,.md,.txt,text/html,text/markdown,text/plain" required></label><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Create private artifact</button></form></main>`), request) : sessionRedirect(request, "/login"));
+  app.get("/artifacts/new", async ({ request }: { request: Request }) => (await sessionUser(auth, request)) ? withCsrf(page(`<main><h1>Upload artifact</h1><p>Supported files: .html, .md, and .txt. Files are private until you publish them.</p><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>Artifact file<input name="file" type="file" accept=".html,.md,.txt,text/html,text/markdown,text/plain" required></label><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Create private artifact</button></form></main>`), request) : sessionRedirect(config, "/login"));
   app.post("/artifacts", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const form = await request.formData();
     const name = form.get("name");
     const file = form.get("file");
@@ -214,7 +214,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
       const format = formatFromFilename(file.name);
       const content = decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes);
       const created = await service.create(user.id, name, content, format);
-      return sessionRedirect(request, `/artifacts/${created.artifact.id}`);
+      return sessionRedirect(config, `/artifacts/${created.artifact.id}`);
     } catch (error) {
       if (error instanceof DomainError) return new Response(error.message, { status: error.status });
       return new Response("Invalid artifact file", { status: 400 });
@@ -222,7 +222,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   });
   app.get("/artifacts/:id", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     try {
       const row = await service.get(user.id, params.id);
       const versions = await service.versions(user.id, row.id);
@@ -236,14 +236,14 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.post("/artifacts/:id/rename", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const form = await request.formData();
     await service.rename(user.id, params.id, form.get("name"));
-    return sessionRedirect(request, `/artifacts/${params.id}`);
+    return sessionRedirect(config, `/artifacts/${params.id}`);
   });
   app.get("/artifacts/:id/versions/:versionId/download", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const artifact = await service.get(user.id, params.id);
     const version = await service.version(user.id, params.id, params.versionId);
     const filename = downloadName(artifact.name, artifact.format);
@@ -262,14 +262,14 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   });
   app.get("/artifacts/:id/versions/:versionId/source", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const artifact = await service.get(user.id, params.id);
     const version = await service.version(user.id, params.id, params.versionId);
     return sourcePage(`<main><p><a href="/artifacts/${artifact.id}/versions/${version.id}/preview">Back to preview</a></p><h1>${escapeHtml(artifact.name)} source</h1><p>Format: ${escapeHtml(artifact.format)} · Version ${version.ordinal}</p><pre>${escapeHtml(version.content)}</pre></main>`);
   });
   app.get("/artifacts/:id/versions/:versionId/preview", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const artifact = await service.get(user.id, params.id);
     await service.version(user.id, params.id, params.versionId);
     return new Response(`<!doctype html><html><head>${robotsMeta()}<title>Preview</title></head><body><aside><strong>Warning:</strong> This content was user-created and is untrusted. Never enter passwords or sensitive information.</aside><p><a href="/artifacts/${artifact.id}/versions/${params.versionId}/source">View source</a> · <a href="/artifacts/${artifact.id}">Back to artifact</a></p><iframe ${previewSandbox(artifact.format)} src="/artifacts/${params.id}/versions/${params.versionId}/content" title="Artifact preview" style="width:100%;height:80vh"></iframe></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8" })) });
@@ -277,20 +277,20 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.post("/artifacts/:id/publish/:versionId", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     await service.publish(user.id, params.id, params.versionId);
-    return sessionRedirect(request, `/artifacts/${params.id}`);
+    return sessionRedirect(config, `/artifacts/${params.id}`);
   });
   app.post("/artifacts/:id/delete", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     await service.remove(user.id, params.id);
-    return sessionRedirect(request, "/artifacts");
+    return sessionRedirect(config, "/artifacts");
   });
   app.get("/trash", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const rows = await service.trash(user.id);
     const token = cookies(request)[csrfCookie] ?? "";
     return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Trash</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name)}<form method="post" action="/artifacts/${row.id}/restore" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Restore</button></form></li>`).join("") || "<li>Trash is empty.</li>"}</ul></main>`), request);
@@ -298,27 +298,27 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.post("/artifacts/:id/restore", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     await service.restore(user.id, params.id);
-    return sessionRedirect(request, `/artifacts/${params.id}`);
+    return sessionRedirect(config, `/artifacts/${params.id}`);
   });
   app.post("/artifacts/:id/unpublish", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     await service.unpublish(user.id, params.id);
-    return sessionRedirect(request, `/artifacts/${params.id}`);
+    return sessionRedirect(config, `/artifacts/${params.id}`);
   });
   app.post("/artifacts/:id/rotate", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const token = await service.rotate(user.id, params.id);
     return page(`<main><h1>New share link</h1><p>This link is shown once. Copy it now:</p><code>${escapeHtml(`${config.appUrl.origin}/s/${token}`)}</code><p><a href="/artifacts/${params.id}">Back</a></p></main>`);
   });
   app.get("/connections", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     const rows = await service.connections(user.id);
     const token = cookies(request)[csrfCookie] ?? "";
     return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Connected applications</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name ?? row.clientId)} — ${row.disabled ? "revoked" : "active"}<form method="post" action="/connections/${encodeURIComponent(row.clientId)}/revoke" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button ${row.disabled ? "disabled" : ""}>Revoke</button></form></li>`).join("") || "<li>No connected applications.</li>"}</ul></main>`), request);
@@ -326,13 +326,13 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.post("/connections/:clientId/revoke", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
     const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(config, "/login");
     try {
       await service.revokeClient(user.id, decodeURIComponent(params.clientId));
     } catch {
       return new Response("Not Found", { status: 404 });
     }
-    return sessionRedirect(request, "/connections");
+    return sessionRedirect(config, "/connections");
   });
   app.get("/s/:token", async ({ params }: { params: Record<string, string> }) => {
     try {
