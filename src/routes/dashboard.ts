@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Auth } from "../auth";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
@@ -35,14 +35,27 @@ function cookies(request: Request): Record<string, string> {
   }));
 }
 
+function cspNonce(): string {
+  return randomBytes(16).toString("base64");
+}
+
 function html(body: string, status = 200, headers = new Headers()): Response {
+  const nonce = cspNonce();
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("X-Content-Type-Options", "nosniff");
   // The local POST starts OAuth and redirects the browser to Microsoft's
-  // authorization host. Keep form submissions same-origin otherwise.
-  headers.set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://login.microsoftonline.com");
+  // authorization host. Keep form submissions same-origin otherwise, and
+  // authorize only this response's inline style block.
+  headers.set("Content-Security-Policy", [
+    "default-src 'self'",
+    `style-src 'nonce-${nonce}'`,
+    "style-src-attr 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self' https://login.microsoftonline.com",
+  ].join("; "));
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact</title><style>body{font:16px system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem;color:#202124}a,button{font:inherit}main{display:grid;gap:1rem}nav{display:flex;gap:1rem;flex-wrap:wrap}label{display:grid;gap:.25rem}input{padding:.5rem}button{padding:.5rem .75rem}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ddd}@media(max-width:40rem){body{margin:.75rem}}</style></head><body>${body}</body></html>`, { status, headers });
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact</title><style nonce="${nonce}">body{font:16px system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem;color:#202124}a,button{font:inherit}main{display:grid;gap:1rem}nav{display:flex;gap:1rem;flex-wrap:wrap}label{display:grid;gap:.25rem}input{padding:.5rem}button{padding:.5rem .75rem}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ddd}.inline{display:inline}@media(max-width:40rem){body{margin:.75rem}}</style></head><body>${body}</body></html>`, { status, headers });
 }
 
 function csrfToken(request: Request): string {
@@ -168,7 +181,9 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/register", ({ request }: { request: Request }) => config.registrationEnabled && !config.microsoft ? withCsrf(html(`<main><h1>Create account</h1><form method="post" action="/api/auth/sign-up/email"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button>Create account</button></form><a href="/login">Sign in</a></main>`), request) : new Response("Not Found", { status: 404 }));
   app.get("/account", async ({ request }: { request: Request }) => {
     const user = await sessionUser(auth, request);
-    return user ? html(`<main><h1>Account</h1><p>${escapeHtml(user.name)} — ${escapeHtml(user.email)} (email unverified)</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`) : sessionRedirect(request, "/login");
+    if (!user) return sessionRedirect(request, "/login");
+    const identityStatus = config.microsoft ? "Microsoft identity authenticated" : user.emailVerified ? "email verified" : "email unverified";
+    return html(`<main><h1>Account</h1><p>${escapeHtml(user.name)} — ${escapeHtml(user.email)} (${identityStatus})</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`);
   });
   app.post("/logout", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
@@ -208,7 +223,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
       const row = await service.get(user.id, params.id);
       const versions = await service.versions(user.id, row.id);
       const token = cookies(request)[csrfCookie] ?? "";
-      return withCsrf(html(`<main><a href="/artifacts">Back</a><h1>${escapeHtml(row.name)}</h1><p>Format: ${escapeHtml(row.format)} · Created ${row.createdAt.toISOString()}</p><form method="post" action="/artifacts/${row.id}/rename"><label>Rename<input name="name" value="${escapeHtml(row.name)}" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rename</button></form>${row.publishedVersionId ? `<form method="post" action="/artifacts/${row.id}/unpublish" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Unpublish</button></form><form method="post" action="/artifacts/${row.id}/rotate" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rotate share link</button></form>` : ""}<h2>Versions</h2><table><thead><tr><th>Ordinal</th><th>Bytes</th><th>Digest</th><th>Source</th><th>Actions</th></tr></thead><tbody>${versions.map((version) => `<tr><td>${version.ordinal}</td><td>${version.byteSize}</td><td>${version.digest}</td><td>${escapeHtml(version.source)}</td><td><a href="/artifacts/${row.id}/versions/${version.id}/preview">Preview</a> <a href="/artifacts/${row.id}/versions/${version.id}/source">Source</a> <a href="/artifacts/${row.id}/versions/${version.id}/download">Download</a><form method="post" action="/artifacts/${row.id}/publish/${version.id}" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Publish</button></form></td></tr>`).join("")}</tbody></table><form method="post" action="/artifacts/${row.id}/delete"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Delete</button></form></main>`), request);
+      return withCsrf(html(`<main><a href="/artifacts">Back</a><h1>${escapeHtml(row.name)}</h1><p>Format: ${escapeHtml(row.format)} · Created ${row.createdAt.toISOString()}</p><form method="post" action="/artifacts/${row.id}/rename"><label>Rename<input name="name" value="${escapeHtml(row.name)}" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rename</button></form>${row.publishedVersionId ? `<form method="post" action="/artifacts/${row.id}/unpublish" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Unpublish</button></form><form method="post" action="/artifacts/${row.id}/rotate" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rotate share link</button></form>` : ""}<h2>Versions</h2><table><thead><tr><th>Ordinal</th><th>Bytes</th><th>Digest</th><th>Source</th><th>Actions</th></tr></thead><tbody>${versions.map((version) => `<tr><td>${version.ordinal}</td><td>${version.byteSize}</td><td>${version.digest}</td><td>${escapeHtml(version.source)}</td><td><a href="/artifacts/${row.id}/versions/${version.id}/preview">Preview</a> <a href="/artifacts/${row.id}/versions/${version.id}/source">Source</a> <a href="/artifacts/${row.id}/versions/${version.id}/download">Download</a><form method="post" action="/artifacts/${row.id}/publish/${version.id}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Publish</button></form></td></tr>`).join("")}</tbody></table><form method="post" action="/artifacts/${row.id}/delete"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Delete</button></form></main>`), request);
     } catch (error) {
       if (error instanceof DomainError && error.code === "ARTIFACT_NOT_FOUND") return new Response("Not Found", { status: 404 });
       return new Response("Internal Server Error", { status: 500 });
@@ -274,7 +289,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     if (!user) return sessionRedirect(request, "/login");
     const rows = await service.trash(user.id);
     const token = cookies(request)[csrfCookie] ?? "";
-    return withCsrf(html(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Trash</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name)}<form method="post" action="/artifacts/${row.id}/restore" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Restore</button></form></li>`).join("") || "<li>Trash is empty.</li>"}</ul></main>`), request);
+    return withCsrf(html(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Trash</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name)}<form method="post" action="/artifacts/${row.id}/restore" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Restore</button></form></li>`).join("") || "<li>Trash is empty.</li>"}</ul></main>`), request);
   });
   app.post("/artifacts/:id/restore", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
@@ -302,7 +317,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     if (!user) return sessionRedirect(request, "/login");
     const rows = await service.connections(user.id);
     const token = cookies(request)[csrfCookie] ?? "";
-    return withCsrf(html(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Connected applications</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name ?? row.clientId)} — ${row.disabled ? "revoked" : "active"}<form method="post" action="/connections/${encodeURIComponent(row.clientId)}/revoke" style="display:inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button ${row.disabled ? "disabled" : ""}>Revoke</button></form></li>`).join("") || "<li>No connected applications.</li>"}</ul></main>`), request);
+    return withCsrf(html(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Connected applications</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name ?? row.clientId)} — ${row.disabled ? "revoked" : "active"}<form method="post" action="/connections/${encodeURIComponent(row.clientId)}/revoke" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button ${row.disabled ? "disabled" : ""}>Revoke</button></form></li>`).join("") || "<li>No connected applications.</li>"}</ul></main>`), request);
   });
   app.post("/connections/:clientId/revoke", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);

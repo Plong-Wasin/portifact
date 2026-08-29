@@ -62,6 +62,9 @@ describe("Microsoft login page", () => {
     expect(body).toContain('name="csrf"');
     expect(body).toContain("Only a Microsoft identity from your configured Organization is accepted");
     expect(response.headers.get("content-security-policy")).toContain("form-action 'self' https://login.microsoftonline.com");
+    const nonce = body.match(/<style nonce="([^"]+)">/)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(response.headers.get("content-security-policy")).toContain(`style-src 'nonce-${nonce}'`);
   });
 
   test("keeps the local login form when Microsoft is not configured", async () => {
@@ -81,6 +84,20 @@ describe("Microsoft login page", () => {
     const response = await createApp(noDatabase, appConfig).handle(new Request("http://localhost/register"));
 
     expect(response.status).toBe(404);
+  });
+
+  test("does not label a Microsoft identity as an unverified email", async () => {
+    const auth = {
+      api: {
+        getSession: async () => ({ user: { name: "Person Example", email: "person@example.com", emailVerified: false } }),
+      },
+    } as never;
+    const response = await createApp(noDatabase, config(microsoftEnv), auth).handle(new Request("http://localhost/account"));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("Microsoft identity authenticated");
+    expect(body).not.toContain("email unverified");
   });
 
   test("starts the Microsoft flow from the browser form", async () => {
