@@ -61,7 +61,9 @@ describe("Microsoft login page", () => {
     expect(body).not.toContain('name="password"');
     expect(body).toContain('name="csrf"');
     expect(body).toContain("Only a Microsoft identity from your configured Organization is accepted");
-    expect(response.headers.get("content-security-policy")).toContain("form-action 'self' https://login.microsoftonline.com");
+    expect(response.headers.get("content-security-policy")).toContain(`form-action 'self' ${appConfig.appUrl.origin} https://login.microsoftonline.com`);
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self' https://static.cloudflareinsights.com");
+    expect(response.headers.get("content-security-policy")).toContain("connect-src 'self' https://cloudflareinsights.com");
     const nonce = body.match(/<style nonce="([^"]+)">/)?.[1];
     expect(nonce).toBeTruthy();
     expect(response.headers.get("content-security-policy")).toContain(`style-src 'nonce-${nonce}'`);
@@ -98,6 +100,7 @@ describe("Microsoft login page", () => {
     expect(response.status).toBe(200);
     expect(body).toContain("Microsoft identity authenticated");
     expect(body).not.toContain("email unverified");
+    expect(response.headers.get("content-security-policy")).toContain(`form-action 'self' ${config(microsoftEnv).appUrl.origin} https://login.microsoftonline.com`);
   });
 
   test("starts the Microsoft flow from the browser form", async () => {
