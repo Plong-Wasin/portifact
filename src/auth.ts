@@ -11,17 +11,48 @@ export type Auth = ReturnType<typeof createAuth>;
 
 const microsoftAuthority = "https://login.microsoftonline.com";
 
-export function microsoftUserFromClaims(claims: Record<string, unknown>, tenantId: string) {
+export type MicrosoftUserInfoFailureReason =
+  | "missing_id_token"
+  | "invalid_id_token_header"
+  | "id_token_verification_failed"
+  | "tenant_mismatch"
+  | "guest_identity"
+  | "invalid_account_claim"
+  | "missing_identity_claims";
+
+export type AuthOptions = {
+  onMicrosoftUserInfoFailure?: (reason: MicrosoftUserInfoFailureReason) => void;
+};
+
+function reportMicrosoftUserInfoFailure(report: AuthOptions["onMicrosoftUserInfoFailure"], reason: MicrosoftUserInfoFailureReason) {
+  try {
+    report?.(reason);
+  } catch {
+    // Diagnostics must never change the authentication result.
+  }
+}
+
+export function microsoftUserFromClaims(claims: Record<string, unknown>, tenantId: string, report?: AuthOptions["onMicrosoftUserInfoFailure"]) {
   // Microsoft emits acct only when it is configured as an optional claim. A
   // value of 1 explicitly identifies a guest; an omitted claim is normal for
   // managed-user ID tokens and must not make sign-in fail.
   const accountType = claims.acct;
-  if (claims.tid !== tenantId || (accountType !== undefined && accountType !== 0)) return null;
+  if (claims.tid !== tenantId) {
+    reportMicrosoftUserInfoFailure(report, "tenant_mismatch");
+    return null;
+  }
+  if (accountType !== undefined && accountType !== 0) {
+    reportMicrosoftUserInfoFailure(report, accountType === 1 ? "guest_identity" : "invalid_account_claim");
+    return null;
+  }
   const id = typeof claims.sub === "string" ? claims.sub : "";
   const email = typeof claims.email === "string"
     ? claims.email
     : typeof claims.preferred_username === "string" ? claims.preferred_username : "";
-  if (!id || !email) return null;
+  if (!id || !email) {
+    reportMicrosoftUserInfoFailure(report, "missing_identity_claims");
+    return null;
+  }
   const name = typeof claims.name === "string" && claims.name.trim() ? claims.name : email;
   return {
     user: {
@@ -34,7 +65,7 @@ export function microsoftUserFromClaims(claims: Record<string, unknown>, tenantI
   };
 }
 
-export function createAuth(db: Database, config: Config) {
+export function createAuth(db: Database, config: Config, options: AuthOptions = {}) {
   const microsoft = config.microsoft;
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -73,11 +104,17 @@ export function createAuth(db: Database, config: Config) {
         scope: ["openid", "profile", "email"],
         disableProfilePhoto: true,
         getUserInfo: async (token) => {
-          if (!token.idToken) return null;
+          if (!token.idToken) {
+            reportMicrosoftUserInfoFailure(options.onMicrosoftUserInfoFailure, "missing_id_token");
+            return null;
+          }
           let claims: Record<string, unknown>;
           try {
             const { kid, alg } = decodeProtectedHeader(token.idToken);
-            if (!kid || alg !== "RS256") return null;
+            if (!kid || alg !== "RS256") {
+              reportMicrosoftUserInfoFailure(options.onMicrosoftUserInfoFailure, "invalid_id_token_header");
+              return null;
+            }
             const publicKey = await getMicrosoftPublicKey(kid, microsoft.tenantId, microsoftAuthority);
             const verified = await jwtVerify(token.idToken, publicKey, {
               algorithms: ["RS256"],
@@ -87,9 +124,10 @@ export function createAuth(db: Database, config: Config) {
             });
             claims = verified.payload;
           } catch {
+            reportMicrosoftUserInfoFailure(options.onMicrosoftUserInfoFailure, "id_token_verification_failed");
             return null;
           }
-          return microsoftUserFromClaims(claims, microsoft.tenantId);
+          return microsoftUserFromClaims(claims, microsoft.tenantId, options.onMicrosoftUserInfoFailure);
         },
       },
     } : undefined,

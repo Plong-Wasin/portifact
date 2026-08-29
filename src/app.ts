@@ -261,7 +261,14 @@ if (import.meta.main) {
   try {
     resources = createDb(config);
     const { createAuth } = await import("./auth");
-    const auth = createAuth(resources.db, config);
+    const auth = createAuth(resources.db, config, {
+      onMicrosoftUserInfoFailure: (reason) => telemetry.captureMessage("Microsoft OAuth user info rejected", {
+        service: "app",
+        route: "/api/auth/callback/microsoft",
+        method: "GET",
+        errorCode: `MICROSOFT_USER_INFO_${reason.toUpperCase()}`,
+      }),
+    });
     let shuttingDown = false;
     const app = createApp(resources.db, config, auth, telemetry);
     const server = app.listen({ hostname: "0.0.0.0", port: config.port });

@@ -34,6 +34,17 @@ describe("Microsoft login page", () => {
     expect(userInfo).toBeNull();
   });
 
+  test("reports a safe reason when Microsoft identity claims are incomplete", () => {
+    const reasons: string[] = [];
+    const userInfo = microsoftUserFromClaims({
+      tid: microsoftEnv.MICROSOFT_TENANT_ID,
+      preferred_username: "person@example.com",
+    }, microsoftEnv.MICROSOFT_TENANT_ID, (reason) => reasons.push(reason));
+
+    expect(userInfo).toBeNull();
+    expect(reasons).toEqual(["missing_identity_claims"]);
+  });
+
   test("offers Microsoft sign-in when Microsoft is configured", async () => {
     const appConfig = config(microsoftEnv);
     const response = await createApp(noDatabase, appConfig).handle(new Request("http://localhost/login"));
