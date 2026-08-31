@@ -3,8 +3,10 @@ import { createApp } from "../src/app";
 import { ArtifactService } from "../src/artifacts/service";
 import { DomainError } from "../src/artifacts/domain";
 import { config } from "./helpers";
+import { JSDOM } from "jsdom";
 
 const owner = { id: "owner-1", name: "Person Example", email: "person@example.com", emailVerified: true };
+const collaborator = { id: "collaborator-1", name: "Collaborator Example", email: "collaborator@example.com", emailVerified: true };
 const artifact = {
   id: "artifact-1",
   ownerId: owner.id,
@@ -66,7 +68,7 @@ describe("dashboard artifact UI", () => {
     (ArtifactService.prototype as any).getForViewer = async () => ({ artifact, access });
     (ArtifactService.prototype as any).viewerVersion = async (_userId: string | null, _artifactId: string, versionId?: string) => ({ artifact, access, version: versionId === "version-1" ? shared : latest });
     (ArtifactService.prototype as any).versionsMetaForViewer = async () => versions;
-    (ArtifactService.prototype as any).shareSettings = async () => ({ artifact, access, people: [{ user: owner, role: "owner" }], canManage: true });
+    (ArtifactService.prototype as any).shareSettings = async () => ({ artifact, access, people: [{ user: owner, role: "owner" }, { user: collaborator, role: "editor" }], canManage: true });
     (ArtifactService.prototype as any).isPinned = async () => false;
 
     try {
@@ -81,6 +83,21 @@ describe("dashboard artifact UI", () => {
       expect(body).toContain("Version history");
       expect(body).toContain("Copy link");
       expect(body).toContain("http://localhost/artifacts/artifact-1");
+      expect(body.indexOf('class="artifact-title"')).toBeLessThan(body.indexOf('class="artifact-header-actions"'));
+      expect(body).toContain('<details class="menu-submenu">');
+      expect(body).not.toContain('<details class="menu-submenu" open>');
+      expect(body.indexOf("General access")).toBeLessThan(body.indexOf("People with access"));
+      const document = new JSDOM(body).window.document;
+      expect(document.querySelectorAll(".title-menu .menu-submenu:not([open])").length).toBe(4);
+      expect(document.querySelector(".danger-section")).not.toBeNull();
+      expect(body).toContain("Move this Artifact to Trash?");
+      expect(body).toContain('aria-label="Role for Collaborator Example"');
+      expect(body).toContain("Remove");
+      const collaboratorRoleForm = document.querySelector('form[action="/artifacts/artifact-1/access/collaborator-1"]');
+      expect(collaboratorRoleForm?.querySelector('select[name="role"]')).not.toBeNull();
+      expect(collaboratorRoleForm?.querySelector("button")?.textContent).toBe("Save");
+      expect(document.querySelector(".share-url")).toBeNull();
+      expect(document.querySelector("[data-copy-url]")?.textContent).toContain("Copy link");
       expect(content.status).toBe(200);
       expect(contentBody).toContain("Shared v1");
     } finally {
@@ -131,6 +148,27 @@ describe("dashboard artifact UI", () => {
       (ArtifactService.prototype as any).shareSettings = originalSettings;
       (ArtifactService.prototype as any).isPinned = originalPinned;
       (ArtifactService.prototype as any).createVersion = originalCreateVersion;
+    }
+  });
+
+  test("keeps the compact role control wired to the explicit Save action", async () => {
+    const originalGrantAccess = (ArtifactService.prototype as any).grantAccess;
+    let received: unknown[] | undefined;
+    (ArtifactService.prototype as any).grantAccess = async (...args: unknown[]) => { received = args; };
+
+    try {
+      const form = new URLSearchParams({ csrf: "csrf-token", role: "viewer" });
+      const response = await appWithSession().handle(new Request("http://localhost/artifacts/artifact-1/access/collaborator-1", {
+        method: "POST",
+        headers: { ...requestHeaders(), "content-type": "application/x-www-form-urlencoded" },
+        body: form,
+      }));
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("http://localhost/artifacts/artifact-1");
+      expect(received).toEqual([owner.id, artifact.id, collaborator.id, "viewer"]);
+    } finally {
+      (ArtifactService.prototype as any).grantAccess = originalGrantAccess;
     }
   });
 

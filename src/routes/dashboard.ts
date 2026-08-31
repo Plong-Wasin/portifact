@@ -89,7 +89,7 @@ button.secondary { color: var(--ink); background: white; border: 1px solid var(-
 button.danger { color: #991b1b; background: #fff1f2; border: 1px solid #fecdd3; box-shadow: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid rgba(45,212,191,.45); outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
-.section-heading, .dashboard-toolbar, .artifact-header-actions, .artifact-meta, .person-row, .version-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.section-heading, .dashboard-toolbar, .artifact-header-content, .artifact-header-actions, .artifact-meta, .person-row, .version-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .dashboard-toolbar { align-items: flex-end; flex-wrap: wrap; }
 .search-form { display: flex; flex: 1 1 20rem; gap: .6rem; padding: 0; background: transparent; border: 0; }
 .search-form input { min-width: 0; }
@@ -108,25 +108,40 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .error-inline { color: #991b1b; font-size: .8rem; font-weight: 700; }
 .artifact-site-header { position: relative; z-index: 30; max-width: none; padding: .55rem clamp(1rem, 3vw, 2rem); background: rgba(255,255,255,.78); border-bottom: 1px solid rgba(226,232,240,.9); box-shadow: 0 4px 18px rgba(30,41,59,.05); backdrop-filter: blur(14px); }
 .artifact-site-header .brand-note { display: none; }
-.artifact-header-actions { min-width: 0; flex: 1; justify-content: flex-end; }
+.artifact-site-header .brand { flex: 0 0 auto; }
+.artifact-header-content { min-width: 0; flex: 1; gap: .65rem; }
+.artifact-title-slot { min-width: 0; flex: 1 1 auto; }
+.artifact-title-slot .menu { max-width: 100%; }
+.artifact-title-slot .menu summary { max-width: min(52vw, 34rem); }
+.artifact-header-actions { min-width: 0; flex: 0 0 auto; justify-content: flex-end; }
 .menu { position: relative; }
 .menu summary { display: flex; align-items: center; gap: .45rem; max-width: min(42vw, 24rem); padding: .45rem .7rem; overflow: hidden; color: var(--ink); font-weight: 800; white-space: nowrap; text-overflow: ellipsis; background: transparent; border-radius: .7rem; cursor: pointer; list-style: none; }
 .menu summary::-webkit-details-marker { display: none; }
 .menu summary::after { content: "⌄"; color: var(--muted); font-size: .85rem; }
-.menu[open] summary { background: var(--primary-soft); }
+.menu[open] > summary { background: var(--primary-soft); }
 .share-trigger { color: white !important; background: linear-gradient(135deg, var(--primary), #7568ef) !important; }
 .share-trigger::after { color: rgba(255,255,255,.8) !important; }
-.menu-popover { position: absolute; z-index: 20; top: calc(100% + .5rem); right: 0; display: grid; gap: .7rem; width: min(90vw, 26rem); max-height: min(75vh, 42rem); padding: 1rem; overflow: auto; background: white; border: 1px solid var(--line); border-radius: 1rem; box-shadow: 0 18px 50px rgba(15,23,42,.16); }
-.title-menu .menu-popover { left: 0; right: auto; width: min(90vw, 22rem); }
-.menu-section { display: grid; gap: .55rem; }
-.menu-section + .menu-section { padding-top: .7rem; border-top: 1px solid var(--line); }
-.menu-section h3 { color: var(--muted); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
-.menu-item { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .65rem; color: var(--ink); font-weight: 700; background: transparent; border: 0; border-radius: .6rem; box-shadow: none; }
+.menu-popover { position: absolute; z-index: 20; top: calc(100% + .35rem); right: 0; display: grid; gap: .35rem; width: min(90vw, 22rem); max-height: min(70vh, 34rem); padding: .6rem; overflow: auto; background: white; border: 1px solid var(--line); border-radius: .8rem; box-shadow: 0 18px 50px rgba(15,23,42,.16); }
+.title-menu .menu-popover { left: 0; right: auto; width: min(90vw, 19rem); }
+.menu-section { display: grid; gap: .35rem; }
+.menu-section + .menu-section { padding-top: .4rem; border-top: 1px solid var(--line); }
+.menu-section h3 { color: var(--muted); font-size: .64rem; letter-spacing: .08em; text-transform: uppercase; }
+.menu-item { display: flex; width: 100%; min-height: 2rem; align-items: center; justify-content: space-between; gap: .6rem; padding: .35rem .5rem; color: var(--ink); font-size: .84rem; font-weight: 700; background: transparent; border: 0; border-radius: .5rem; box-shadow: none; }
 .menu-item:hover { color: var(--primary-dark); background: var(--primary-soft); }
-.menu-popover form { padding: .7rem; gap: .65rem; border-radius: .8rem; }
+.menu-item.danger { color: #991b1b; }
+.menu-popover form { padding: .5rem; gap: .45rem; border-radius: .65rem; }
 .menu-popover form.inline { padding: 0; }
-.menu-popover label { font-size: .82rem; }
-.person-row, .version-row { align-items: flex-start; padding: .65rem 0; border-bottom: 1px solid var(--line); }
+.menu-popover label { font-size: .76rem; }
+.menu-popover input, .menu-popover select { padding: .5rem .6rem; font-size: .82rem; }
+.menu-popover button { min-height: 2.1rem; padding: .4rem .65rem; font-size: .8rem; }
+.menu-submenu { display: grid; gap: .25rem; }
+.menu-submenu > summary { list-style: none; cursor: pointer; }
+.menu-submenu > summary::-webkit-details-marker { display: none; }
+.menu-submenu[open] > summary { color: var(--primary-dark); background: var(--primary-soft); }
+.menu-submenu.danger-submenu[open] > summary { color: #991b1b; background: #fff1f2; }
+.menu-submenu-content { display: grid; gap: .35rem; padding: .1rem 0 0; }
+.menu-submenu:not([open]) > .menu-submenu-content { display: none; }
+.person-row, .version-row { align-items: flex-start; padding: .4rem 0; border-bottom: 1px solid var(--line); }
 .person-row:last-child, .version-row:last-child { border-bottom: 0; }
 .person-details, .version-details { min-width: 0; display: grid; gap: .05rem; }
 .person-details strong, .version-details strong { overflow-wrap: anywhere; }
@@ -148,10 +163,11 @@ pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
   .page-content { padding: .75rem 1rem 2rem; }
   main { margin: .75rem auto; border-radius: 1.25rem; }
   .artifact-site-header { align-items: center; padding: .5rem .75rem; backdrop-filter: none; }
-  .artifact-site-header .brand { flex: 0 0 auto; }
+  .artifact-site-header .brand > span:last-child { display: none; }
+  .artifact-header-content { gap: .35rem; }
   .artifact-header-actions { gap: .35rem; }
   .menu summary { max-width: 44vw; padding-inline: .45rem; }
-  .menu-popover { position: fixed; top: auto; right: .65rem; bottom: .65rem; left: .65rem; width: auto; max-height: 80vh; padding: 1rem; border-radius: 1.25rem; }
+  .menu-popover { position: fixed; top: auto; right: .65rem; bottom: .65rem; left: .65rem; width: auto; max-height: 70vh; padding: .65rem; border-radius: 1rem; }
   .title-menu .menu-popover { left: .65rem; width: auto; }
   .artifact-workspace { height: calc(100vh - 3.25rem); min-height: calc(100vh - 3.25rem); padding: .5rem; }
   .dashboard-toolbar { align-items: stretch; }
@@ -322,25 +338,27 @@ function renderTitleMenu(viewer: ArtifactViewer, versions: Array<{ id: string; o
   const artifactId = encodeURIComponent(viewer.artifact.id);
   const canBrowse = viewer.access.canBrowseVersions;
   const versionLinks = canBrowse && versions.length
-    ? `<div class="menu-section"><h3>Version history</h3>${versions.map((version) => `<a class="menu-item" href="/artifacts/${artifactId}?version=${encodeURIComponent(version.id)}"><span>Version ${version.ordinal}</span>${version.id === viewer.artifact.latestVersionId ? '<span class="badge">Latest</span>' : ""}</a>`).join("")}</div>`
+    ? `<details class="menu-submenu"><summary class="menu-item">Version history <span class="badge">${versions.length}</span></summary><div class="menu-submenu-content">${versions.map((version) => `<a class="menu-item" href="/artifacts/${artifactId}?version=${encodeURIComponent(version.id)}"><span>Version ${version.ordinal}</span>${version.id === viewer.artifact.latestVersionId ? '<span class="badge">Latest</span>' : ""}</a>`).join("")}</div></details>`
     : "";
   const versionActions = viewer.access.canViewSource || viewer.access.canDownload
     ? `<div class="menu-section"><h3>Current version</h3>${viewer.access.canViewSource ? `<a class="menu-item" href="/artifacts/${artifactId}/source?version=${encodeURIComponent(selectedVersionId)}">View source</a>` : ""}${viewer.access.canDownload ? `<a class="menu-item" href="/artifacts/${artifactId}/download?version=${encodeURIComponent(selectedVersionId)}">Download</a>` : ""}</div>`
     : "";
   const upload = viewer.access.canContribute
-    ? `<div class="menu-section"><h3>New version</h3><form method="post" action="/artifacts/${artifactId}/versions" enctype="multipart/form-data"><label>Upload ${escapeHtml(viewer.artifact.format)} file<input name="file" type="file" required></label><input type="hidden" name="parent_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="view_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Upload new version</button></form></div>`
+    ? `<details class="menu-submenu"><summary class="menu-item">Upload new version</summary><div class="menu-submenu-content"><form method="post" action="/artifacts/${artifactId}/versions" enctype="multipart/form-data"><label>Upload ${escapeHtml(viewer.artifact.format)} file<input name="file" type="file" required></label><input type="hidden" name="parent_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="view_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Upload new version</button></form></div></details>`
     : "";
   const rename = viewer.access.canManage
-    ? `<div class="menu-section"><h3>Rename</h3><form method="post" action="/artifacts/${artifactId}/rename"><label>Artifact name<input name="name" value="${escapeHtml(viewer.artifact.name)}" required maxlength="200"></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save name</button></form></div>`
+    ? `<details class="menu-submenu"><summary class="menu-item">Rename</summary><div class="menu-submenu-content"><form method="post" action="/artifacts/${artifactId}/rename"><label>Artifact name<input name="name" value="${escapeHtml(viewer.artifact.name)}" required maxlength="200"></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save name</button></form></div></details>`
     : "";
   const pin = canPin ? `<form method="post" action="/artifacts/${artifactId}/${pinned ? "unpin" : "pin"}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item" type="submit">${pinned ? "Unpin" : "Pin"}</button></form>` : "";
   const leave = viewer.access.kind !== "owner" && viewer.access.kind !== "general"
     ? `<form method="post" action="/artifacts/${artifactId}/leave" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item" type="submit">Leave artifact</button></form>`
     : "";
-  const remove = viewer.access.canManage
-    ? `<form method="post" action="/artifacts/${artifactId}/delete" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item danger" type="submit">Delete</button></form>`
+  const deleteMenu = viewer.access.canManage
+    ? `<details class="menu-submenu danger-submenu"><summary class="menu-item danger">Delete</summary><div class="menu-submenu-content"><form method="post" action="/artifacts/${artifactId}/delete"><p class="muted">Move this Artifact to Trash?</p><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="danger" type="submit">Confirm delete</button></form></div></details>`
     : "";
-  return `<details class="menu title-menu"><summary class="artifact-title" data-artifact-link="/artifacts/${artifactId}">${escapeHtml(viewer.artifact.name)}</summary><div class="menu-popover"><div class="menu-section"><h3>Access</h3><span class="muted">${displayAccess(viewer.access.kind)}</span></div>${rename}${upload}${versionLinks}${versionActions}<div class="menu-section">${pin}${leave}${remove}</div></div></details>`;
+  const personalActions = pin || leave ? `<div class="menu-section">${pin}${leave}</div>` : "";
+  const deleteAction = deleteMenu ? `<div class="menu-section danger-section">${deleteMenu}</div>` : "";
+  return `<details class="menu title-menu"><summary class="artifact-title" data-artifact-link="/artifacts/${artifactId}">${escapeHtml(viewer.artifact.name)}</summary><div class="menu-popover"><div class="menu-section"><span class="muted">${displayAccess(viewer.access.kind)}</span></div>${rename}${upload}${versionLinks}${versionActions}${personalActions}${deleteAction}</div></details>`;
 }
 
 function personRow(artifactId: string, person: PeopleWithAccess, canManage: boolean, csrf: string): string {
@@ -352,19 +370,24 @@ function personRow(artifactId: string, person: PeopleWithAccess, canManage: bool
 
 function renderShareMenu(config: Config, viewer: ArtifactViewer, people: PeopleWithAccess[], versions: Array<{ id: string; ordinal: number }>, csrf: string, peopleQuery: string, searchResults: Array<{ id: string; name: string; email: string }>): string {
   const artifactId = encodeURIComponent(viewer.artifact.id);
-  const link = canonicalLink(config, viewer.artifact.id);
+  const artifactLink = canonicalLink(config, viewer.artifact.id);
   const canManage = viewer.access.canManage;
-  const search = canManage
-    ? `<form method="get" action="/artifacts/${artifactId}"><label>Search for people to invite<input name="people" value="${escapeHtml(peopleQuery)}" placeholder="Name or email"></label><button class="secondary">Search</button></form>${searchResults.length ? `<ul class="people-list">${searchResults.map((person) => `<li class="person-row"><span class="person-details"><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml(person.email)}</span></span><form method="post" action="/artifacts/${artifactId}/access/${encodeURIComponent(person.id)}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><select name="role" aria-label="Role for ${escapeHtml(person.name)}"><option value="viewer">View</option><option value="editor">Edit</option></select><button>Add</button></form></li>`).join("")}</ul>` : ""}`
+  const addPeopleMenu = canManage
+    ? `<details class="menu-submenu"${peopleQuery ? " open" : ""}><summary class="menu-item">Add people</summary><div class="menu-submenu-content"><form method="get" action="/artifacts/${artifactId}"><label>Search for people to invite<input name="people" value="${escapeHtml(peopleQuery)}" placeholder="Name or email"></label><button class="secondary">Search</button></form>${searchResults.length ? `<ul class="people-list">${searchResults.map((person) => `<li class="person-row"><span class="person-details"><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml(person.email)}</span></span><form method="post" action="/artifacts/${artifactId}/access/${encodeURIComponent(person.id)}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><select name="role" aria-label="Role for ${escapeHtml(person.name)}"><option value="viewer">View</option><option value="editor">Edit</option></select><button>Add</button></form></li>`).join("")}</ul>` : ""}</div></details>`
     : "";
   const peopleBlock = people.length ? `<ul class="people-list">${people.map((person) => personRow(artifactId, person, canManage, csrf)).join("")}</ul>` : `<p class="empty-state">No people have access yet.</p>`;
-  const general = canManage
+  const generalAccessForm = canManage
     ? `<form method="post" action="/artifacts/${artifactId}/general-access"><label>General access<select name="general_access"><option value="only_people_with_access" ${viewer.artifact.generalAccess === "only_people_with_access" ? "selected" : ""}>Only people with access</option><option value="everyone_with_login" ${viewer.artifact.generalAccess === "everyone_with_login" ? "selected" : ""}>Everyone with login</option><option value="anyone_with_the_link" ${viewer.artifact.generalAccess === "anyone_with_the_link" ? "selected" : ""}>Anyone with the link</option></select></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save access</button></form>`
     : `<p class="muted">${displayGeneralAccess(viewer.artifact.generalAccess)}</p>`;
-  const sharedVersion = canManage && viewer.artifact.generalAccess !== "only_people_with_access"
-    ? `<form method="post" action="/artifacts/${artifactId}/shared-version"><label>Shared version<select name="version"><option value="latest" ${viewer.artifact.sharedVersionId ? "" : "selected"}>Latest</option>${versions.map((version) => `<option value="${escapeHtml(version.id)}" ${viewer.artifact.sharedVersionId === version.id ? "selected" : ""}>Version ${version.ordinal}</option>`).join("")}</select></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save shared version</button></form>`
-    : `<p class="muted">Shared version applies only to broader General access.</p>`;
-  return `<details class="menu"><summary class="share-trigger">Share</summary><div class="menu-popover"><div class="menu-section"><h3>Artifact link</h3><code class="share-url">${escapeHtml(link)}</code><button type="button" data-copy-url="${escapeHtml(link)}">Copy link</button></div><div class="menu-section"><h3>People with access</h3>${search}${peopleBlock}</div><div class="menu-section"><h3>General access</h3>${general}${sharedVersion}</div></div></details>`;
+  const sharedVersion = viewer.artifact.generalAccess !== "only_people_with_access"
+    ? canManage
+      ? `<form method="post" action="/artifacts/${artifactId}/shared-version"><label>Shared version<select name="version"><option value="latest" ${viewer.artifact.sharedVersionId ? "" : "selected"}>Latest</option>${versions.map((version) => `<option value="${escapeHtml(version.id)}" ${viewer.artifact.sharedVersionId === version.id ? "selected" : ""}>Version ${version.ordinal}</option>`).join("")}</select></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save shared version</button></form>`
+      : `<p class="muted">Shared version is controlled by the Owner.</p>`
+    : "";
+  const peopleMenu = people.length || canManage
+    ? `<details class="menu-submenu"${peopleQuery ? " open" : ""}><summary class="menu-item">People with access <span class="badge">${people.length}</span></summary><div class="menu-submenu-content">${addPeopleMenu}${peopleBlock}</div></details>`
+    : "";
+  return `<details class="menu"><summary class="share-trigger">Share</summary><div class="menu-popover"><div class="menu-section"><h3>General access</h3>${generalAccessForm}${sharedVersion}</div><div class="menu-section"><button type="button" data-copy-url="${escapeHtml(artifactLink)}">Copy link</button></div>${peopleMenu ? `<div class="menu-section">${peopleMenu}</div>` : ""}</div></details>`;
 }
 
 function artifactPreviewBody(viewer: ArtifactViewer, versionId: string): string {
@@ -494,7 +517,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
       const shareMenu = renderShareMenu(config, viewer, settings?.people ?? [], versions, token, peopleQuery, searchResults);
       const uploadErrorCode = query.get("upload_error");
       const uploadError = uploadErrorCode ? `<span class="error-inline" role="alert">${escapeHtml(uploadErrorMessage(uploadErrorCode))}</span>` : "";
-      const header = `<div class="artifact-header-actions">${uploadError}${titleMenu}<span class="badge">${escapeHtml(displayAccess(viewer.access.kind))}</span>${shareMenu}</div>`;
+      const header = `<div class="artifact-header-content"><div class="artifact-title-slot">${titleMenu}</div><div class="artifact-header-actions">${uploadError}<span class="badge">${escapeHtml(displayAccess(viewer.access.kind))}</span>${shareMenu}</div></div>`;
       return withCsrf(artifactPage(artifactPreviewBody(viewer, selected.version.id), header), request, token);
     } catch (error) {
       if (error instanceof DomainError && error.code === "LOGIN_REQUIRED") return sessionRedirect(config, `/login?returnTo=${encodeURIComponent(`/artifacts/${params.id}`)}`);
