@@ -16,7 +16,6 @@ cp .env.example .env
 Set these values in `.env` before starting:
 
 - `BETTER_AUTH_SECRET`: random value, at least 32 characters
-- `SHARE_LINK_ENCRYPTION_KEY`: random value, at least 32 characters
 - `POSTGRES_PASSWORD`: database password
 - `DATABASE_URL`: use the same database credentials, for example:
   `postgresql://portifact:<password>@postgres:5432/portifact`
@@ -25,7 +24,6 @@ Generate secrets:
 
 ```sh
 openssl rand -base64 48
-openssl rand -base64 32
 ```
 
 Start all services:

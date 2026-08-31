@@ -1,6 +1,6 @@
 # Portifact Artifact Context
 
-Portifact stores and shares self-contained work products that can be viewed, reused, and published independently of the conversation or process that created them.
+Portifact stores self-contained work products that can be viewed, reused, and shared independently of the conversation or process that created them.
 
 ## Artifact language
 
@@ -53,3 +53,45 @@ _Avoid_: Company user, employee (unless employment status is relevant)
 **Microsoft identity**:
 The organization-managed identity used by an Internal user to sign in to Portifact.
 _Avoid_: Microsoft account (when a personal Microsoft account is not allowed)
+
+## Access language
+
+**Owner**:
+The Internal user who owns an Artifact and has authority to manage its name, access, sharing, and deletion.
+_Avoid_: Creator (when ownership is meant)
+
+**Explicit access**:
+Permission granted directly to a named Internal user for one Artifact.
+_Avoid_: Invite (after access has been granted)
+
+**Viewer**:
+An Internal user with Explicit access limited to viewing an Artifact and its available Versions, without changing its content or access.
+_Avoid_: Reader
+
+**Editor**:
+An Internal user with Explicit access to contribute new Versions to an Artifact through supported uploads, without owning the Artifact or managing its access.
+_Avoid_: Collaborator (when the role matters)
+
+**General access**:
+An Artifact-wide audience rule that determines whether access is limited to people with Explicit access, available to all logged-in Internal users, or available to anyone with the Artifact link.
+_Avoid_: Public access (because some modes are not public)
+
+**Shared version**:
+The Version shown to viewers who reach an Artifact through General access without Explicit access. `latest` follows the newest Version, while a numbered Version remains fixed; people with Explicit access can access every Version instead.
+_Avoid_: Published revision
+
+**Version history**:
+The ordered collection of immutable Versions belonging to an Artifact, which people with Explicit access can browse and open individually.
+_Avoid_: Revision history
+
+**Artifact link**:
+The one stable address for an Artifact and all of its Versions, regardless of whether the viewer is its Owner, has Explicit access, is a logged-in Internal user, or is an anonymous link visitor.
+_Avoid_: Share link (when referring to a separate URL)
+
+**Pin**:
+A personal marker an Internal user applies to an Artifact for dashboard organization.
+_Avoid_: Favorite
+
+**Trash**:
+The recoverable state of a deleted Artifact during its retention period.
+_Avoid_: Archive

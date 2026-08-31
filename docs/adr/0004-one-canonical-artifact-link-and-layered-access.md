@@ -1,0 +1,5 @@
+# One canonical artifact link with layered access
+
+**Status: accepted.** Portifact will expose one stable, opaque Artifact link per Artifact and all of its Versions. Authorization is evaluated for each request using the Owner, Explicit access, and General access; Portifact will not issue separate private, public, or per-Version URLs. General access supports people with Explicit access, all logged-in Internal users, or anyone with the Artifact link. The Shared version applies only to viewers reached through General access without Explicit access; the Owner and Explicit access users can browse and open every immutable Version through the same Artifact link.
+
+This preserves one identity and one link while access changes over time, but requires request-time authorization and identifiers that are difficult to guess. Separate share-token URLs and a single globally published snapshot were rejected because they make link identity diverge from the Artifact and cannot express the required distinction between explicitly shared users and general-access viewers.

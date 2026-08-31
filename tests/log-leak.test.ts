@@ -13,7 +13,6 @@ const PATTERNS: RegExp[] = [
   /\$\{[^}]*password[^}]*\}/i,
   /\$\{[^}]*secret[^}]*\}/i,
   /\$\{[^}]*databaseUrl[^}]*\}/i,
-  /\$\{[^}]*shareLinkEncryptionKey[^}]*\}/i,
   /\$\{[^}]*betterAuthSecret[^}]*\}/i,
   /\$\{[^}]*clientSecret[^}]*\}/i,
 ];

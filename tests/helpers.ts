@@ -19,7 +19,6 @@ export function env(overrides: Record<string, string> = {}): Record<string, stri
     RETENTION_DAYS: "30",
     ACCESS_TOKEN_TTL_SECONDS: "900",
     IDEMPOTENCY_TTL_SECONDS: "86400",
-    SHARE_LINK_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     LOG_LEVEL: "warn",
     BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     ...overrides,

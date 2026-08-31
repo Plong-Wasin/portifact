@@ -163,7 +163,7 @@ export function createAuth(db: Database, config: Config, options: AuthOptions = 
         oidcConfig: {
           loginPage: "/login",
           accessTokenExpiresIn: config.accessTokenTtlSeconds,
-          scopes: ["artifacts:read", "artifacts:write", "artifacts:publish"],
+          scopes: ["artifacts:read", "artifacts:write"],
           defaultScope: "artifacts:read",
           requirePKCE: true,
           allowPlainCodeChallengeMethod: false,

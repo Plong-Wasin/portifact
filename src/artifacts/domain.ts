@@ -1,28 +1,3 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-
-const keyBytes = (key: string) => createHash("sha256").update(key).digest();
-
-export function encryptToken(token: string, key: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", keyBytes(key), iv);
-  const ciphertext = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64url");
-}
-
-export function decryptToken(encoded: string, key: string): string {
-  try {
-    const payload = Buffer.from(encoded, "base64url");
-    const decipher = createDecipheriv("aes-256-gcm", keyBytes(key), payload.subarray(0, 12));
-    decipher.setAuthTag(payload.subarray(12, 28));
-    return Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]).toString("utf8");
-  } catch {
-    throw new DomainError("INVALID_SHARE_TOKEN", "invalid share token", 404);
-  }
-}
-
-export const shareTokenKey = keyBytes;
-
-
 export const ARTIFACT_ROBOTS = "noindex, nofollow, noarchive, nosnippet, noimageindex";
 export const ARTIFACT_CSP = [
   "default-src 'none'",
@@ -51,20 +26,22 @@ export class DomainError extends Error {
   }
 }
 
+export const GENERAL_ACCESS_MODES = [
+  "only_people_with_access",
+  "everyone_with_login",
+  "anyone_with_the_link",
+] as const;
+export type GeneralAccessMode = typeof GENERAL_ACCESS_MODES[number];
+
+export const ARTIFACT_ACCESS_ROLES = ["viewer", "editor"] as const;
+export type ArtifactAccessRole = typeof ARTIFACT_ACCESS_ROLES[number];
+
 export function validateName(value: unknown): string {
   if (typeof value !== "string") throw new DomainError("INVALID_ARTIFACT_NAME");
   const name = value.trim();
   const length = [...name].length;
   if (length < 1 || length > 200) throw new DomainError("INVALID_ARTIFACT_NAME");
   return name;
-}
-
-export function tokenValue(): string {
-  return randomBytes(32).toString("base64url");
-}
-
-export function tokenDigest(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 export function artifactHeaders(headers = new Headers()): Headers {

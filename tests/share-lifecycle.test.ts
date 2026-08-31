@@ -13,69 +13,97 @@ async function setup() {
   await runMigrations(cfg);
   const now = new Date();
   const ownerId = crypto.randomUUID();
-  await db.insert(user).values({
-    id: ownerId, name: "tester", email: `${ownerId}@test.local`,
-    emailVerified: false, createdAt: now, updatedAt: now,
-  });
+  const viewerId = crypto.randomUUID();
+  await db.insert(user).values([
+    { id: ownerId, name: "owner", email: `${ownerId}@test.local`, emailVerified: false, createdAt: now, updatedAt: now },
+    { id: viewerId, name: "viewer", email: `${viewerId}@test.local`, emailVerified: false, createdAt: now, updatedAt: now },
+  ]);
   const service = new ArtifactService(db, cfg);
-  return { db, sql, service, ownerId };
+  return { db, sql, service, ownerId, viewerId };
 }
 
-describe.skipIf(!DSN)("share lifecycle", () => {
-  test("publish then rotate revokes the old token and issues a new one", async () => {
-    const { sql, service, ownerId } = await setup();
+describe.skipIf(!DSN)("artifact access lifecycle", () => {
+  test("keeps one canonical link while general access selects the shared version", async () => {
+    const { sql, service, ownerId, viewerId } = await setup();
     try {
-      const created = await service.create(ownerId, "doc", "<p>hi</p>", "html");
-      const version = (await service.versions(ownerId, created.artifact.id))[0];
+      const created = await service.create(ownerId, "doc", "<p>v1</p>", "html");
+      const v1 = (await service.versions(ownerId, created.artifact.id))[0]!;
+      const v2 = (await service.createVersion(ownerId, created.artifact.id, v1.id, "<p>v2</p>", "html")).version;
+      expect((await service.createVersion(ownerId, created.artifact.id, v2.id, "<p>v2</p>", "html")).version.id).toBe(v2.id);
+      await expect(service.createVersion(ownerId, created.artifact.id, v1.id, "<p>v3</p>", "html")).rejects.toMatchObject({ code: "VERSION_CONFLICT" });
 
-      const pub1 = await service.publish(ownerId, created.artifact.id, version.id);
-      const shared1 = await service.shared(pub1.token);
-      expect(shared1.version.id).toBe(version.id);
+      await service.setGeneralAccess(ownerId, created.artifact.id, "anyone_with_the_link");
+      await service.setSharedVersion(ownerId, created.artifact.id, "latest");
+      expect((await service.viewerVersion(null, created.artifact.id)).version.id).toBe(v2.id);
+      await service.setSharedVersion(ownerId, created.artifact.id, v1.id);
+      const publicView = await service.viewerVersion(null, created.artifact.id);
+      expect(publicView.version.id).toBe(v1.id);
+      await expect(service.viewerVersion(null, created.artifact.id, v2.id)).rejects.toMatchObject({ code: "VERSION_FORBIDDEN" });
 
-      const pub2 = await service.rotate(ownerId, created.artifact.id);
-      expect(pub2.token).not.toBe(pub1.token);
-
-      const history = await service.shareLinks(ownerId, created.artifact.id);
-      expect(history.map((link) => link.token)).toEqual([pub2.token, pub1.token]);
-      expect(history[0]?.revokedAt).toBeNull();
-      expect(history[1]?.revokedAt).toBeInstanceOf(Date);
-
-      await expect(service.shared(pub1.token)).rejects.toThrow(); // revoked
-      const shared2 = await service.shared(pub2.token);
-      expect(shared2.version.id).toBe(version.id);
-
-      await service.remove(ownerId, created.artifact.id);
+      await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
+      expect((await service.viewerVersion(viewerId, created.artifact.id, v2.id)).version.id).toBe(v2.id);
     } finally {
       await sql.close();
     }
   });
 
-  test("delete revokes active share link", async () => {
-    const { sql, service, ownerId } = await setup();
+  test("delete makes access unavailable and restore returns the artifact as private", async () => {
+    const { sql, service, ownerId, viewerId } = await setup();
     try {
       const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
-      const version = (await service.versions(ownerId, created.artifact.id))[0];
-      const pub = await service.publish(ownerId, created.artifact.id, version.id);
-
+      await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
+      await service.setGeneralAccess(ownerId, created.artifact.id, "anyone_with_the_link");
       await service.remove(ownerId, created.artifact.id);
-      await expect(service.shared(pub.token)).rejects.toThrow();
-    } finally {
-      await sql.close();
-    }
-  });
+      await expect(service.getForViewer(viewerId, created.artifact.id)).rejects.toThrow();
 
-  test("restore cancels the pending purge job", async () => {
-    const { db, sql, service, ownerId } = await setup();
-    try {
-      const { eq } = await import("drizzle-orm");
-      const { job } = await import("../src/db/schema");
-      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
-      await service.remove(ownerId, created.artifact.id);
-      const before = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
-      expect(before.length).toBe(1);
       await service.restore(ownerId, created.artifact.id);
-      const after = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
-      expect(after.length).toBe(0);
+      const restored = await service.get(ownerId, created.artifact.id);
+      expect(restored.generalAccess).toBe("only_people_with_access");
+      expect((await service.getForViewer(viewerId, created.artifact.id)).access.kind).toBe("viewer");
+      await expect(service.getForViewer(null, created.artifact.id)).rejects.toThrow();
+    } finally {
+      await sql.close();
+    }
+  });
+
+  test("explicit roles bypass the shared version and keep mutation boundaries", async () => {
+    const { db, sql, service, ownerId, viewerId } = await setup();
+    try {
+      const { user } = await import("../src/db/schema");
+      const editorId = crypto.randomUUID();
+      const now = new Date();
+      await db.insert(user).values({ id: editorId, name: "editor", email: `${editorId}@test.local`, emailVerified: false, createdAt: now, updatedAt: now });
+      const created = await service.create(ownerId, "doc", "<p>v1</p>", "html");
+      const v1 = created.version;
+      const v2 = (await service.createVersion(ownerId, created.artifact.id, v1.id, "<p>v2</p>", "html")).version;
+      await service.setGeneralAccess(ownerId, created.artifact.id, "anyone_with_the_link");
+      await service.setSharedVersion(ownerId, created.artifact.id, v1.id);
+      await service.grantAccess(ownerId, created.artifact.id, editorId, "editor");
+      await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
+
+      expect((await service.viewerVersion(editorId, created.artifact.id, v2.id)).version.id).toBe(v2.id);
+      expect((await service.viewerVersion(viewerId, created.artifact.id, v2.id)).version.id).toBe(v2.id);
+      await expect(service.createVersion(viewerId, created.artifact.id, v2.id, "<p>nope</p>", "html")).rejects.toMatchObject({ code: "VERSION_CREATE_FORBIDDEN" });
+      await expect(service.rename(editorId, created.artifact.id, "not allowed")).rejects.toThrow();
+    } finally {
+      await sql.close();
+    }
+  });
+
+  test("keeps General access out of dashboard discovery and isolates personal pins", async () => {
+    const { sql, service, ownerId, viewerId } = await setup();
+    try {
+      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
+      await service.setGeneralAccess(ownerId, created.artifact.id, "anyone_with_the_link");
+      expect(await service.listForUser(viewerId, "all")).toHaveLength(0);
+
+      await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
+      expect((await service.listForUser(viewerId, "shared"))[0]?.accessRole).toBe("viewer");
+      expect((await service.listForUser(viewerId, "yours"))).toHaveLength(0);
+      expect((await service.listForUser(ownerId, "yours"))[0]?.pinned).toBe(false);
+      await service.pin(viewerId, created.artifact.id);
+      expect((await service.listForUser(viewerId, "all"))[0]?.pinned).toBe(true);
+      expect((await service.listForUser(ownerId, "all"))[0]?.pinned).toBe(false);
     } finally {
       await sql.close();
     }

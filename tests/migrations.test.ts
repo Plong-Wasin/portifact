@@ -8,6 +8,7 @@ describe("migration foundation", () => {
     expect(existsSync("drizzle/0004_format_neutral_content.sql")).toBe(true);
     expect(existsSync("drizzle/0005_migrate_html_content.sql")).toBe(true);
     expect(existsSync("drizzle/0006_drop_legacy_html_column.sql")).toBe(true);
+    expect(existsSync("drizzle/0007_artifact_access_model.sql")).toBe(true);
     expect(existsSync("drizzle/meta/_journal.json")).toBe(true);
   });
 

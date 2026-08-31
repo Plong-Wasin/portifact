@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Auth } from "../auth";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { ArtifactService, type ShareLinkInfo } from "../artifacts/service";
+import { ArtifactService, type ArtifactListItem, type ArtifactViewer, type PeopleWithAccess } from "../artifacts/service";
 import { artifactHeaders, ARTIFACT_CSP, DomainError, escapeHtml, robotsMeta } from "../artifacts/domain";
 import { contentMimeType, decodeContent, formatExtension, formatFromFilename, type ArtifactFormat } from "../artifacts/content";
 import { renderPreview } from "../artifacts/renderer";
@@ -43,7 +43,7 @@ const APP_CSS = `
 :root {
   color-scheme: light;
   --canvas: #f4f7fb;
-  --surface: rgba(255, 255, 255, .92);
+  --surface: rgba(255, 255, 255, .94);
   --surface-muted: #f8fafc;
   --ink: #142033;
   --muted: #64748b;
@@ -53,203 +53,110 @@ const APP_CSS = `
   --primary-soft: #eeecff;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-
 * { box-sizing: border-box; }
 html { min-height: 100%; background: var(--canvas); }
-body {
-  min-height: 100vh;
-  margin: 0;
-  color: var(--ink);
-  font-size: 16px;
-  line-height: 1.6;
-  background:
-    radial-gradient(circle at 10% -5%, rgba(124, 109, 246, .2), transparent 34rem),
-    radial-gradient(circle at 100% 0%, rgba(45, 212, 191, .12), transparent 30rem),
-    var(--canvas);
-}
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  content: "";
-  pointer-events: none;
-  background: linear-gradient(135deg, rgba(255, 255, 255, .3), transparent 45%);
-}
+body { min-height: 100vh; margin: 0; color: var(--ink); font-size: 16px; line-height: 1.6; background: radial-gradient(circle at 10% -5%, rgba(124,109,246,.2), transparent 34rem), radial-gradient(circle at 100% 0%, rgba(45,212,191,.12), transparent 30rem), var(--canvas); }
+body::before { position: fixed; inset: 0; z-index: -1; content: ""; pointer-events: none; background: linear-gradient(135deg, rgba(255,255,255,.3), transparent 45%); }
 .app-shell { min-height: 100vh; }
-.site-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem .5rem;
-}
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: .75rem;
-  color: var(--ink);
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: -.02em;
-}
+.site-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 1120px; margin: 0 auto; padding: 1rem 1.5rem; }
+.brand { display: inline-flex; align-items: center; gap: .7rem; color: var(--ink); font-size: 1.05rem; font-weight: 800; letter-spacing: -.02em; }
 .brand:hover { color: var(--primary-dark); }
-.brand-mark {
-  display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
-  place-items: center;
-  color: white;
-  font-size: 1.1rem;
-  font-weight: 900;
-  background: linear-gradient(135deg, #7c6df6, #4f46e5);
-  border-radius: .75rem;
-  box-shadow: 0 8px 18px rgba(79, 70, 229, .25);
-}
+.brand-mark { display: grid; width: 2.25rem; height: 2.25rem; place-items: center; color: white; font-size: 1.1rem; font-weight: 900; background: linear-gradient(135deg, #7c6df6, #4f46e5); border-radius: .75rem; box-shadow: 0 8px 18px rgba(79,70,229,.25); }
 .brand-note { color: var(--muted); font-size: .85rem; font-weight: 600; }
 .page-content { max-width: 1120px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
-main {
-  display: grid;
-  gap: 1.5rem;
-  min-width: 0;
-  width: min(100%, 880px);
-  margin: 1.5rem auto;
-  padding: clamp(1.25rem, 3vw, 2.25rem);
-  background: var(--surface);
-  border: 1px solid rgba(255, 255, 255, .8);
-  border-radius: 1.75rem;
-  box-shadow: 0 20px 60px rgba(30, 41, 59, .09), 0 2px 8px rgba(30, 41, 59, .04);
-  backdrop-filter: blur(14px);
-}
-main:has(form[action="/login/microsoft"]),
-main:has(form[action^="/api/auth/sign-in"]),
-main:has(form[action^="/api/auth/sign-up"]) { width: min(100%, 540px); }
-.preview-page {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  width: 100%;
-  height: calc(100vh - 3.5rem);
-  min-height: calc(100vh - 3.5rem);
-  margin: 0;
-  padding: 1rem clamp(1rem, 3vw, 2rem) 1.25rem;
-  overflow: hidden;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-body:has(main.preview-page) .page-content { max-width: none; padding: 0; }
-body:has(main.preview-page) .site-header {
-  max-width: none;
-  padding: .6rem clamp(1rem, 3vw, 2rem);
-  background: rgba(255, 255, 255, .72);
-  border-bottom: 1px solid rgba(226, 232, 240, .9);
-  box-shadow: 0 4px 18px rgba(30, 41, 59, .05);
-  backdrop-filter: blur(14px);
-}
-h1, h2, p { margin: 0; }
+main { display: grid; gap: 1.5rem; min-width: 0; width: min(100%, 920px); margin: 1.5rem auto; padding: clamp(1.25rem, 3vw, 2.25rem); background: var(--surface); border: 1px solid rgba(255,255,255,.8); border-radius: 1.75rem; box-shadow: 0 20px 60px rgba(30,41,59,.09), 0 2px 8px rgba(30,41,59,.04); backdrop-filter: blur(14px); }
+main:has(form[action="/login/microsoft"]), main:has(form[action^="/api/auth/sign-in"]), main:has(form[action^="/api/auth/sign-up"]) { width: min(100%, 540px); }
+h1, h2, h3, p { margin: 0; }
 h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.45rem); line-height: 1.15; letter-spacing: -.045em; }
 h2 { font-size: 1.15rem; line-height: 1.25; letter-spacing: -.02em; }
 p { color: var(--muted); }
 .eyebrow { color: var(--primary-dark); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-a { color: var(--primary-dark); font-weight: 700; text-decoration: none; transition: color .18s ease, transform .18s ease; }
+a { color: var(--primary-dark); font-weight: 700; text-decoration: none; transition: color .18s ease; }
 a:hover { color: var(--primary); }
 nav { display: flex; flex-wrap: wrap; gap: .55rem; padding-bottom: .25rem; }
 nav a { padding: .48rem .78rem; color: var(--muted); font-size: .9rem; border: 1px solid transparent; border-radius: .75rem; }
-nav a:hover { color: var(--primary-dark); background: var(--primary-soft); border-color: #ddd9ff; }
-.section-heading, .preview-heading, .share-link-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.section-heading { margin-top: .25rem; }
-.share-links, .preview-warning, .result-link { display: grid; gap: .8rem; }
-.preview-warning { padding: .85rem 1rem; color: #854d0e; background: #fffbeb; border: 1px solid #fde68a; border-radius: .9rem; }
-.preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); }
-.preview-toolbar h1 { font-size: clamp(1.15rem, 2.5vw, 1.6rem); letter-spacing: -.03em; }
-.preview-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-.preview-actions a { color: var(--muted); }
+nav a:hover, nav a.active { color: var(--primary-dark); background: var(--primary-soft); border-color: #ddd9ff; }
 form { display: grid; gap: 1rem; padding: 1.1rem; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 1.15rem; }
-form.inline { display: inline; padding: 0; background: transparent; border: 0; border-radius: 0; }
+form.inline { display: inline-flex; align-items: center; padding: 0; background: transparent; border: 0; border-radius: 0; }
 label { display: grid; gap: .4rem; color: var(--ink); font-size: .9rem; font-weight: 750; }
-input {
-  width: 100%;
-  padding: .72rem .85rem;
-  color: var(--ink);
-  font: inherit;
-  background: white;
-  border: 1px solid #cbd5e1;
-  border-radius: .75rem;
-  outline: none;
-  transition: border-color .18s ease, box-shadow .18s ease;
-}
-input:hover { border-color: #94a3b8; }
-input:focus { border-color: #8175ee; box-shadow: 0 0 0 4px rgba(91, 76, 226, .13); }
+input, select { width: 100%; padding: .72rem .85rem; color: var(--ink); font: inherit; background: white; border: 1px solid #cbd5e1; border-radius: .75rem; outline: none; }
+input:hover, select:hover { border-color: #94a3b8; }
+input:focus, select:focus { border-color: #8175ee; box-shadow: 0 0 0 4px rgba(91,76,226,.13); }
 input[type="file"] { padding: .55rem; background: white; border-style: dashed; }
-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: .45rem;
-  min-height: 2.7rem;
-  padding: .62rem 1rem;
-  color: white;
-  font: inherit;
-  font-weight: 750;
-  background: linear-gradient(135deg, var(--primary), #7568ef);
-  border: 0;
-  border-radius: .78rem;
-  box-shadow: 0 8px 16px rgba(91, 76, 226, .2);
-  cursor: pointer;
-  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
-}
-button:hover { filter: brightness(1.04); box-shadow: 0 11px 22px rgba(91, 76, 226, .27); transform: translateY(-1px); }
-button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid rgba(45, 212, 191, .45); outline-offset: 2px; }
-button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
-.table-wrap { width: 100%; min-width: 0; overflow-x: auto; border-radius: 1rem; }
-table { width: 100%; min-width: 720px; table-layout: fixed; overflow: hidden; background: white; border: 1px solid var(--line); border-radius: 1rem; border-spacing: 0; border-collapse: separate; }
-th, td { padding: .85rem 1rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
-th:nth-child(1), td:nth-child(1) { width: 8%; }
-th:nth-child(2), td:nth-child(2) { width: 9%; }
-th:nth-child(3), td:nth-child(3) { width: 29%; }
-th:nth-child(4), td:nth-child(4) { width: 14%; }
-th:nth-child(5), td:nth-child(5) { width: 40%; }
-th { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: var(--surface-muted); }
-tr:last-child td { border-bottom: 0; }
-.digest, .share-url { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
-.digest { color: #312e81; font-size: .8rem; }
-.version-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
-.version-actions a { white-space: nowrap; }
-.version-actions form.inline { display: inline-flex; }
-.version-actions button, .share-link-item button { min-height: 2.25rem; padding: .42rem .7rem; font-size: .85rem; }
-ul { display: grid; gap: .65rem; padding: 0; margin: 0; list-style: none; }
-li { padding: .9rem 1rem; background: white; border: 1px solid var(--line); border-radius: .9rem; }
-.share-link-list { gap: .7rem; }
-.share-link-item { display: grid; gap: .65rem; }
-.share-link-item.revoked { background: var(--surface-muted); }
-.share-link-item.revoked .share-url { color: var(--muted); }
-.share-status { display: inline-flex; width: fit-content; padding: .2rem .55rem; color: #166534; font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #dcfce7; border-radius: 999px; }
-.share-status.revoked { color: #991b1b; background: #fee2e2; }
-.share-status.unpublished { color: #854d0e; background: #fef3c7; }
-.share-link-date { color: var(--muted); font-size: .82rem; }
-.share-link-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
-.share-link-controls button { flex: 0 0 auto; }
-.result-link { padding: 1rem; background: var(--primary-soft); border: 1px solid #ddd9ff; border-radius: 1rem; }
-.result-link .share-url { margin: 0; }
-.artifact-frame { width: 100%; height: 100%; min-height: 0; border: 1px solid var(--line); border-radius: 1rem; background: white; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 2.55rem; padding: .58rem .9rem; color: white; font: inherit; font-weight: 750; background: linear-gradient(135deg, var(--primary), #7568ef); border: 0; border-radius: .78rem; box-shadow: 0 8px 16px rgba(91,76,226,.2); cursor: pointer; }
+button:hover { filter: brightness(1.04); box-shadow: 0 11px 22px rgba(91,76,226,.27); }
+button.secondary { color: var(--ink); background: white; border: 1px solid var(--line); box-shadow: none; }
+button.danger { color: #991b1b; background: #fff1f2; border: 1px solid #fecdd3; box-shadow: none; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid rgba(45,212,191,.45); outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+.section-heading, .dashboard-toolbar, .artifact-header-actions, .artifact-meta, .person-row, .version-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.dashboard-toolbar { align-items: flex-end; flex-wrap: wrap; }
+.search-form { display: flex; flex: 1 1 20rem; gap: .6rem; padding: 0; background: transparent; border: 0; }
+.search-form input { min-width: 0; }
+.filter-tabs { display: flex; flex-wrap: wrap; gap: .45rem; }
+.filter-tabs a { padding: .55rem .8rem; color: var(--muted); border: 1px solid var(--line); border-radius: .75rem; }
+.filter-tabs a.active { color: var(--primary-dark); background: var(--primary-soft); border-color: #c8c2ff; }
+.artifact-list, .people-list, .version-list { display: grid; gap: .7rem; padding: 0; margin: 0; list-style: none; }
+.artifact-list-item { display: grid; gap: .45rem; padding: 1rem 1.1rem; background: white; border: 1px solid var(--line); border-radius: 1rem; }
+.artifact-list-item:hover { border-color: #c8c2ff; box-shadow: 0 8px 24px rgba(79,70,229,.08); }
+.artifact-list-item a.title { color: var(--ink); font-size: 1.05rem; }
+.artifact-list-item a.title:hover { color: var(--primary-dark); }
+.artifact-list-meta, .muted { color: var(--muted); font-size: .85rem; }
+.badge { display: inline-flex; width: fit-content; align-items: center; padding: .18rem .55rem; color: var(--primary-dark); font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: var(--primary-soft); border-radius: 999px; }
+.empty-state, .notice { padding: 1.15rem; color: var(--muted); background: var(--surface-muted); border: 1px dashed #cbd5e1; border-radius: 1rem; }
+.error-state { padding: 1.15rem; color: #991b1b; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 1rem; }
+.artifact-site-header { max-width: none; padding: .55rem clamp(1rem, 3vw, 2rem); background: rgba(255,255,255,.78); border-bottom: 1px solid rgba(226,232,240,.9); box-shadow: 0 4px 18px rgba(30,41,59,.05); backdrop-filter: blur(14px); }
+.artifact-site-header .brand-note { display: none; }
+.artifact-header-actions { min-width: 0; flex: 1; justify-content: flex-end; }
+.menu { position: relative; }
+.menu summary { display: flex; align-items: center; gap: .45rem; max-width: min(42vw, 24rem); padding: .45rem .7rem; overflow: hidden; color: var(--ink); font-weight: 800; white-space: nowrap; text-overflow: ellipsis; background: transparent; border-radius: .7rem; cursor: pointer; list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary::after { content: "⌄"; color: var(--muted); font-size: .85rem; }
+.menu[open] summary { background: var(--primary-soft); }
+.share-trigger { color: white !important; background: linear-gradient(135deg, var(--primary), #7568ef) !important; }
+.share-trigger::after { color: rgba(255,255,255,.8) !important; }
+.menu-popover { position: absolute; z-index: 20; top: calc(100% + .5rem); right: 0; display: grid; gap: .7rem; width: min(90vw, 26rem); max-height: min(75vh, 42rem); padding: 1rem; overflow: auto; background: white; border: 1px solid var(--line); border-radius: 1rem; box-shadow: 0 18px 50px rgba(15,23,42,.16); }
+.title-menu .menu-popover { left: 0; right: auto; width: min(90vw, 22rem); }
+.menu-section { display: grid; gap: .55rem; }
+.menu-section + .menu-section { padding-top: .7rem; border-top: 1px solid var(--line); }
+.menu-section h3 { color: var(--muted); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+.menu-item { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .65rem; color: var(--ink); font-weight: 700; background: transparent; border: 0; border-radius: .6rem; box-shadow: none; }
+.menu-item:hover { color: var(--primary-dark); background: var(--primary-soft); }
+.menu-popover form { padding: .7rem; gap: .65rem; border-radius: .8rem; }
+.menu-popover form.inline { padding: 0; }
+.menu-popover label { font-size: .82rem; }
+.person-row, .version-row { align-items: flex-start; padding: .65rem 0; border-bottom: 1px solid var(--line); }
+.person-row:last-child, .version-row:last-child { border-bottom: 0; }
+.person-details, .version-details { min-width: 0; display: grid; gap: .05rem; }
+.person-details strong, .version-details strong { overflow-wrap: anywhere; }
+.person-details span, .version-details span { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.person-controls { display: flex; flex: 0 0 auto; align-items: center; gap: .35rem; }
+.person-controls select { width: auto; min-width: 6.5rem; padding: .38rem .5rem; font-size: .8rem; }
+.person-controls button { min-height: 2.1rem; padding: .35rem .55rem; font-size: .78rem; }
+.artifact-workspace { display: grid; width: 100%; height: calc(100vh - 3.5rem); min-height: calc(100vh - 3.5rem); margin: 0; padding: .75rem clamp(.75rem, 2vw, 1.5rem) 1rem; overflow: hidden; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+body:has(main.artifact-workspace) .page-content { max-width: none; padding: 0; }
+.artifact-frame { width: 100%; height: 100%; min-height: 0; background: white; border: 1px solid var(--line); border-radius: 1rem; }
 .copy-buffer { position: fixed; inset: -1000px; width: 1px; height: 1px; opacity: 0; }
 code, pre { color: #312e81; background: var(--primary-soft); border-radius: .5rem; }
 code { padding: .15rem .4rem; }
 pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
-.inline { display: inline; }
+.source-page { width: min(100%, 960px); }
+.source-page pre { color: var(--ink); background: white; border: 1px solid var(--line); }
 @media (max-width: 40rem) {
   .site-header { align-items: flex-start; padding-inline: 1rem; }
-  .brand-note { display: none; }
   .page-content { padding: .75rem 1rem 2rem; }
   main { margin: .75rem auto; border-radius: 1.25rem; }
-  main.preview-page { height: calc(100vh - 3.25rem); min-height: calc(100vh - 3.25rem); margin: 0; padding: .75rem; border-radius: 0; }
-  .preview-toolbar { align-items: flex-start; flex-direction: column; gap: .65rem; }
-  nav { gap: .35rem; }
-  nav a { padding: .4rem .6rem; }
-  table { min-width: 720px; }
+  .artifact-site-header { align-items: center; padding: .5rem .75rem; }
+  .artifact-site-header .brand { flex: 0 0 auto; }
+  .artifact-header-actions { gap: .35rem; }
+  .menu summary { max-width: 44vw; padding-inline: .45rem; }
+  .menu-popover { position: fixed; top: auto; right: .65rem; bottom: .65rem; left: .65rem; width: auto; max-height: 80vh; padding: 1rem; border-radius: 1.25rem; }
+  .title-menu .menu-popover { left: .65rem; width: auto; }
+  .artifact-workspace { height: calc(100vh - 3.25rem); min-height: calc(100vh - 3.25rem); padding: .5rem; }
+  .dashboard-toolbar { align-items: stretch; }
+  .search-form { flex-basis: 100%; }
+  .person-row { align-items: stretch; flex-direction: column; gap: .45rem; }
+  .person-controls { justify-content: flex-end; }
 }
 `;
 
@@ -284,14 +191,10 @@ document.addEventListener("click", async (event) => {
 });
 `;
 
-function html(body: string, status = 200, headers = new Headers(), formActionOrigin?: string): Response {
+function html(body: string, status = 200, headers = new Headers(), headerContent = "", formActionOrigin?: string): Response {
   const nonce = cspNonce();
-  const formActionSources = ["'self'", ...(formActionOrigin ? [formActionOrigin] : []), "https://login.microsoftonline.com"].join(" ");
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("X-Content-Type-Options", "nosniff");
-  // The local POST starts OAuth and redirects the browser to Microsoft's
-  // authorization host. Keep form submissions same-origin otherwise, and
-  // authorize only this response's inline style block.
   headers.set("Content-Security-Policy", [
     "default-src 'self'",
     `script-src 'self' https://static.cloudflareinsights.com 'nonce-${nonce}'`,
@@ -300,10 +203,12 @@ function html(body: string, status = 200, headers = new Headers(), formActionOri
     "style-src-attr 'none'",
     "frame-ancestors 'none'",
     "base-uri 'none'",
-    `form-action ${formActionSources}`,
+    `form-action ${["'self'", ...(formActionOrigin ? [formActionOrigin] : []), "https://login.microsoftonline.com"].join(" ")}`,
   ].join("; "));
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact · Artifact workspace</title><style nonce="${nonce}">${APP_CSS}</style></head><body><div class="app-shell"><header class="site-header"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">P</span><span>Portifact</span></a><span class="brand-note">Artifact workspace</span></header><div class="page-content">${body}</div></div><script nonce="${nonce}">${COPY_SCRIPT}</script></body></html>`, { status, headers });
+  const headerClass = headerContent ? "site-header artifact-site-header" : "site-header";
+  const header = `<header class="${headerClass}"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">P</span><span>Portifact</span></a>${headerContent || '<span class="brand-note">Artifact workspace</span>'}</header>`;
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${robotsMeta()}<title>Portifact · Artifact workspace</title><style nonce="${nonce}">${APP_CSS}</style></head><body><div class="app-shell">${header}<div class="page-content">${body}</div></div><script nonce="${nonce}">${COPY_SCRIPT}</script></body></html>`, { status, headers });
 }
 
 function csrfToken(request: Request): string {
@@ -351,20 +256,15 @@ async function startMicrosoftLogin(request: Request, auth: Auth, config: Config)
   const response = await auth.handler(new Request(new URL("/api/auth/sign-in/social", request.url), {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      provider: "microsoft",
-      callbackURL,
-      errorCallbackURL: "/login/error",
-    }),
+    body: JSON.stringify({ provider: "microsoft", callbackURL, errorCallbackURL: "/login/error" }),
   }));
   const location = response.headers.get("location");
   if (!response.ok || !location) return new Response("Unable to start sign-in", { status: 502 });
   const redirectHeaders = new Headers({ Location: location });
   const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
   const setCookies = getSetCookie ? getSetCookie.call(response.headers) : [];
-  if (setCookies.length) {
-    for (const cookie of setCookies) redirectHeaders.append("Set-Cookie", cookie);
-  } else {
+  if (setCookies.length) for (const cookie of setCookies) redirectHeaders.append("Set-Cookie", cookie);
+  else {
     const setCookie = response.headers.get("set-cookie");
     if (setCookie) redirectHeaders.set("Set-Cookie", setCookie);
   }
@@ -382,11 +282,10 @@ export function sourcePage(body: string): Response {
 }
 
 function contentHeaders(format: ArtifactFormat): Headers {
-  const headers = artifactHeaders(new Headers({
+  return artifactHeaders(new Headers({
     "Content-Type": "text/html; charset=utf-8",
     "Content-Security-Policy": format === "html" ? ARTIFACT_CSP : DOCUMENT_CSP,
   }));
-  return headers;
 }
 
 async function previewContent(format: ArtifactFormat, source: string): Promise<Response> {
@@ -406,42 +305,86 @@ export function previewSandbox(format: ArtifactFormat): string {
   return format === "html" ? `sandbox="allow-scripts"` : "sandbox";
 }
 
-function absoluteShareUrl(config: Config, path: string): string {
-  return new URL(path, config.appUrl.origin).toString();
+function canonicalLink(config: Config, artifactId: string): string {
+  return new URL(`/artifacts/${encodeURIComponent(artifactId)}`, config.appUrl.origin).toString();
 }
 
-function renderShareLinkHistory(links: ShareLinkInfo[], config: Config, published: boolean): string {
-  const visibleLinks = links.filter((link) => !link.revokedAt);
-  if (!visibleLinks.length) return "";
-  return `<section class="share-links"><div class="section-heading"><div><p class="eyebrow">Sharing</p><h2>Share link</h2></div><p>${visibleLinks.length} active link</p></div><p>Copy this link to share the published artifact.</p><ul class="share-link-list">${visibleLinks.map((link) => {
-    const url = absoluteShareUrl(config, link.url);
-    const status = published ? "Active" : "Unpublished";
-    const statusClass = published ? "active" : "unpublished";
-    return `<li class="share-link-item ${statusClass}"><div class="share-link-meta"><span class="share-status ${statusClass}">${status}</span><time class="share-link-date" datetime="${link.createdAt.toISOString()}">${link.createdAt.toISOString()}</time></div><code class="share-url">${escapeHtml(url)}</code><div class="share-link-controls"><button type="button" data-copy-url="${escapeHtml(url)}">Copy link</button></div></li>`;
-  }).join("")}</ul></section>`;
+function displayAccess(kind: string): string {
+  return ({ owner: "Owner", editor: "Editor", viewer: "Viewer", general: "Preview access" } as Record<string, string>)[kind] ?? "Preview access";
 }
 
-function renderVersionTable(artifactId: string, versions: Array<{ id: string; ordinal: number; byteSize: number; digest: string; source: string }>, csrf: string): string {
-  const encodedArtifactId = encodeURIComponent(artifactId);
-  return `<div class="table-wrap"><table><thead><tr><th>Ordinal</th><th>Bytes</th><th>Digest</th><th>Source</th><th>Actions</th></tr></thead><tbody>${versions.map((version) => {
-    const encodedVersionId = encodeURIComponent(version.id);
-    return `<tr><td>${version.ordinal}</td><td>${version.byteSize}</td><td><code class="digest">${escapeHtml(version.digest)}</code></td><td>${escapeHtml(version.source)}</td><td><div class="version-actions"><a href="/artifacts/${encodedArtifactId}/versions/${encodedVersionId}/preview">Preview</a><a href="/artifacts/${encodedArtifactId}/versions/${encodedVersionId}/source">Source</a><a href="/artifacts/${encodedArtifactId}/versions/${encodedVersionId}/download">Download</a><form method="post" action="/artifacts/${encodedArtifactId}/publish/${encodedVersionId}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Publish</button></form></div></td></tr>`;
-  }).join("")}</tbody></table></div>`;
+function displayGeneralAccess(mode: string): string {
+  return ({ only_people_with_access: "Only people with access", everyone_with_login: "Everyone with login", anyone_with_the_link: "Anyone with the link" } as Record<string, string>)[mode] ?? mode;
 }
 
-function previewPageBody(title: string, sourceHref: string, backHref: string, frameSrc: string, sandbox: string): string {
-  return `<main class="preview-page"><div class="preview-toolbar"><div class="preview-heading"><div><p class="eyebrow">Artifact preview</p><h1>${escapeHtml(title)}</h1></div><span class="share-status active">Read-only</span></div><div class="preview-actions"><a href="${escapeHtml(sourceHref)}">View source</a><a href="${escapeHtml(backHref)}">Back to artifact</a></div></div><div class="preview-warning" role="status"><strong>Untrusted content:</strong> This artifact was created by a user. Never enter passwords or sensitive information.</div><iframe class="artifact-frame" ${sandbox} src="${escapeHtml(frameSrc)}" title="Artifact preview"></iframe></main>`;
+function renderTitleMenu(viewer: ArtifactViewer, versions: Array<{ id: string; ordinal: number }>, csrf: string, pinned: boolean, canPin: boolean, selectedVersionId: string): string {
+  const artifactId = encodeURIComponent(viewer.artifact.id);
+  const canBrowse = viewer.access.canBrowseVersions;
+  const versionLinks = canBrowse && versions.length
+    ? `<div class="menu-section"><h3>Version history</h3>${versions.map((version) => `<a class="menu-item" href="/artifacts/${artifactId}?version=${encodeURIComponent(version.id)}"><span>Version ${version.ordinal}</span>${version.id === viewer.artifact.latestVersionId ? '<span class="badge">Latest</span>' : ""}</a>`).join("")}</div>`
+    : "";
+  const versionActions = viewer.access.canViewSource || viewer.access.canDownload
+    ? `<div class="menu-section"><h3>Current version</h3>${viewer.access.canViewSource ? `<a class="menu-item" href="/artifacts/${artifactId}/source?version=${encodeURIComponent(selectedVersionId)}">View source</a>` : ""}${viewer.access.canDownload ? `<a class="menu-item" href="/artifacts/${artifactId}/download?version=${encodeURIComponent(selectedVersionId)}">Download</a>` : ""}</div>`
+    : "";
+  const upload = viewer.access.canContribute
+    ? `<div class="menu-section"><h3>New version</h3><form method="post" action="/artifacts/${artifactId}/versions" enctype="multipart/form-data"><label>Upload ${escapeHtml(viewer.artifact.format)} file<input name="file" type="file" required></label><input type="hidden" name="parent_version_id" value="${escapeHtml(viewer.artifact.latestVersionId ?? "")}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Upload new version</button></form></div>`
+    : "";
+  const rename = viewer.access.canManage
+    ? `<div class="menu-section"><h3>Rename</h3><form method="post" action="/artifacts/${artifactId}/rename"><label>Artifact name<input name="name" value="${escapeHtml(viewer.artifact.name)}" required maxlength="200"></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save name</button></form></div>`
+    : "";
+  const pin = canPin ? `<form method="post" action="/artifacts/${artifactId}/${pinned ? "unpin" : "pin"}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item" type="submit">${pinned ? "Unpin" : "Pin"}</button></form>` : "";
+  const leave = viewer.access.kind !== "owner" && viewer.access.kind !== "general"
+    ? `<form method="post" action="/artifacts/${artifactId}/leave" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item" type="submit">Leave artifact</button></form>`
+    : "";
+  const remove = viewer.access.canManage
+    ? `<form method="post" action="/artifacts/${artifactId}/delete" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="menu-item danger" type="submit">Delete</button></form>`
+    : "";
+  return `<details class="menu title-menu"><summary class="artifact-title" data-artifact-link="/artifacts/${artifactId}">${escapeHtml(viewer.artifact.name)}</summary><div class="menu-popover"><div class="menu-section"><h3>Access</h3><span class="muted">${displayAccess(viewer.access.kind)}</span></div>${rename}${upload}${versionLinks}${versionActions}<div class="menu-section">${pin}${leave}${remove}</div></div></details>`;
 }
 
-function shareLinkResultPage(title: string, message: string, url: string, backHref: string): string {
-  return `<main class="result-page"><p class="eyebrow">Sharing</p><h1>${title}</h1><p>${message}</p><div class="result-link"><code class="share-url">${escapeHtml(url)}</code><button type="button" data-copy-url="${escapeHtml(url)}">Copy link</button></div><p><a href="${backHref}">Back to artifact</a></p></main>`;
+function personRow(artifactId: string, person: PeopleWithAccess, canManage: boolean, csrf: string): string {
+  const role = person.role === "owner" ? "Owner" : person.role === "editor" ? "Editor" : "Viewer";
+  if (person.role === "owner" || !canManage) return `<li class="person-row"><span class="person-details"><strong>${escapeHtml(person.user.name)}</strong><span>${escapeHtml(person.user.email)}</span></span><span class="badge">${role}</span></li>`;
+  const encodedUserId = encodeURIComponent(person.user.id);
+  return `<li class="person-row"><span class="person-details"><strong>${escapeHtml(person.user.name)}</strong><span>${escapeHtml(person.user.email)}</span></span><span class="person-controls"><form method="post" action="/artifacts/${artifactId}/access/${encodedUserId}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><select name="role" aria-label="Role for ${escapeHtml(person.user.name)}"><option value="viewer" ${person.role === "viewer" ? "selected" : ""}>View</option><option value="editor" ${person.role === "editor" ? "selected" : ""}>Edit</option></select><button>Save</button></form><form method="post" action="/artifacts/${artifactId}/access/${encodedUserId}/remove" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="danger" aria-label="Remove ${escapeHtml(person.user.name)}">Remove</button></form></span></li>`;
+}
+
+function renderShareMenu(config: Config, viewer: ArtifactViewer, people: PeopleWithAccess[], versions: Array<{ id: string; ordinal: number }>, csrf: string, peopleQuery: string, searchResults: Array<{ id: string; name: string; email: string }>): string {
+  const artifactId = encodeURIComponent(viewer.artifact.id);
+  const link = canonicalLink(config, viewer.artifact.id);
+  const canManage = viewer.access.canManage;
+  const search = canManage
+    ? `<form method="get" action="/artifacts/${artifactId}"><label>Search for people to invite<input name="people" value="${escapeHtml(peopleQuery)}" placeholder="Name or email"></label><button class="secondary">Search</button></form>${searchResults.length ? `<ul class="people-list">${searchResults.map((person) => `<li class="person-row"><span class="person-details"><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml(person.email)}</span></span><form method="post" action="/artifacts/${artifactId}/access/${encodeURIComponent(person.id)}" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><select name="role" aria-label="Role for ${escapeHtml(person.name)}"><option value="viewer">View</option><option value="editor">Edit</option></select><button>Add</button></form></li>`).join("")}</ul>` : ""}`
+    : "";
+  const peopleBlock = people.length ? `<ul class="people-list">${people.map((person) => personRow(artifactId, person, canManage, csrf)).join("")}</ul>` : `<p class="empty-state">No people have access yet.</p>`;
+  const general = canManage
+    ? `<form method="post" action="/artifacts/${artifactId}/general-access"><label>General access<select name="general_access"><option value="only_people_with_access" ${viewer.artifact.generalAccess === "only_people_with_access" ? "selected" : ""}>Only people with access</option><option value="everyone_with_login" ${viewer.artifact.generalAccess === "everyone_with_login" ? "selected" : ""}>Everyone with login</option><option value="anyone_with_the_link" ${viewer.artifact.generalAccess === "anyone_with_the_link" ? "selected" : ""}>Anyone with the link</option></select></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save access</button></form>`
+    : `<p class="muted">${displayGeneralAccess(viewer.artifact.generalAccess)}</p>`;
+  const sharedVersion = canManage && viewer.artifact.generalAccess !== "only_people_with_access"
+    ? `<form method="post" action="/artifacts/${artifactId}/shared-version"><label>Shared version<select name="version"><option value="latest" ${viewer.artifact.sharedVersionId ? "" : "selected"}>Latest</option>${versions.map((version) => `<option value="${escapeHtml(version.id)}" ${viewer.artifact.sharedVersionId === version.id ? "selected" : ""}>Version ${version.ordinal}</option>`).join("")}</select></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save shared version</button></form>`
+    : `<p class="muted">Shared version applies only to broader General access.</p>`;
+  return `<details class="menu"><summary class="share-trigger">Share</summary><div class="menu-popover"><div class="menu-section"><h3>Artifact link</h3><code class="share-url">${escapeHtml(link)}</code><button type="button" data-copy-url="${escapeHtml(link)}">Copy link</button></div><div class="menu-section"><h3>People with access</h3>${search}${peopleBlock}</div><div class="menu-section"><h3>General access</h3>${general}${sharedVersion}</div></div></details>`;
+}
+
+function artifactPreviewBody(viewer: ArtifactViewer, versionId: string): string {
+  const frameSrc = `/artifacts/${encodeURIComponent(viewer.artifact.id)}/content?version=${encodeURIComponent(versionId)}`;
+  return `<main class="artifact-workspace" aria-label="Artifact preview" data-access-kind="${escapeHtml(viewer.access.kind)}"><iframe class="artifact-frame" ${previewSandbox(viewer.artifact.format)} src="${escapeHtml(frameSrc)}" title="${escapeHtml(viewer.artifact.name)} Preview"></iframe></main>`;
+}
+
+function errorResponse(error: unknown, artifactResponse = false): Response {
+  if (error instanceof Response) return error;
+  const status = error instanceof DomainError ? error.status : 500;
+  const message = error instanceof DomainError && error.code === "LOGIN_REQUIRED" ? "Sign in to view this Artifact." : status === 404 ? "Not Found" : error instanceof DomainError ? error.message : "Internal Server Error";
+  const headers = artifactResponse ? artifactHeaders(new Headers()) : new Headers();
+  if (status === 500) return new Response("Internal Server Error", { status, headers });
+  return new Response(message, { status, headers });
 }
 
 export function registerDashboardRoutes(app: any, db: Database, config: Config, auth?: Auth) {
   const service = new ArtifactService(db, config);
-  const page = (body: string, status = 200, headers = new Headers()) => html(body, status, headers, config.appUrl.origin);
-  const artifactPage = (body: string, status = 200) => {
-    const response = page(body, status);
+  const page = (body: string, status = 200, headers = new Headers(), headerContent = "") => html(body, status, headers, headerContent, config.appUrl.origin);
+  const artifactPage = (body: string, headerContent: string, status = 200) => {
+    const response = page(body, status, new Headers(), headerContent);
     artifactHeaders(response.headers);
     return response;
   };
@@ -449,11 +392,11 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/login", ({ request }: { request: Request }) => {
     const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
     const loginURL = new URL(request.url);
-    const callbackURL = loginURL.searchParams.has("client_id") && loginURL.searchParams.has("redirect_uri")
-      ? `/api/auth/mcp/authorize${loginURL.search}`
-      : "/artifacts";
+    const requestedReturnTo = loginURL.searchParams.get("returnTo");
+    const returnTo = requestedReturnTo?.startsWith("/") && !requestedReturnTo.startsWith("//") ? requestedReturnTo : "/artifacts";
+    const callbackURL = loginURL.searchParams.has("client_id") && loginURL.searchParams.has("redirect_uri") ? `/api/auth/mcp/authorize${loginURL.search}` : returnTo;
     const body = config.microsoft
-      ? `<main><h1>Sign in</h1><p>Only a Microsoft identity from your configured Organization is accepted. Personal identities and identities outside the Organization are not supported.</p><form method="post" action="/login/microsoft"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><input type="hidden" name="callbackURL" value="${escapeHtml(callbackURL)}"><button type="submit">Sign in with Microsoft</button></form></main>`
+      ? `<main><h1>Sign in</h1><p>Only a Microsoft identity from your configured Organization is accepted.</p><form method="post" action="/login/microsoft"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><input type="hidden" name="callbackURL" value="${escapeHtml(callbackURL)}"><button type="submit">Sign in with Microsoft</button></form></main>`
       : `<main><h1>Sign in</h1><form method="post" action="/api/auth/sign-in/email"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>${config.registrationEnabled ? '<a href="/register">Create an account</a>' : ""}</main>`;
     return withCsrf(page(body), request, token);
   });
@@ -465,10 +408,10 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/login/error", loginErrorPage);
   app.get("/register", ({ request }: { request: Request }) => config.registrationEnabled && !config.microsoft ? withCsrf(page(`<main><h1>Create account</h1><form method="post" action="/api/auth/sign-up/email"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button>Create account</button></form><a href="/login">Sign in</a></main>`), request) : new Response("Not Found", { status: 404 }));
   app.get("/account", async ({ request }: { request: Request }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const identityStatus = config.microsoft ? "Microsoft identity authenticated" : user.emailVerified ? "email verified" : "email unverified";
-    return page(`<main><h1>Account</h1><p>${escapeHtml(user.name)} — ${escapeHtml(user.email)} (${identityStatus})</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    const identityStatus = config.microsoft ? "Microsoft identity authenticated" : current.emailVerified ? "email verified" : "email unverified";
+    return page(`<main><h1>Account</h1><p>${escapeHtml(current.name)} — ${escapeHtml(current.email)} (${identityStatus})</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Log out</button></form></main>`);
   });
   app.post("/logout", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
@@ -476,176 +419,192 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     return sessionRedirect(config, "/login");
   });
   app.get("/artifacts", async ({ request }: { request: Request }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const rows = await service.list(user.id);
-    const token = cookies(request)[csrfCookie] ?? "";
-    return withCsrf(page(`<main><nav><a href="/account">Account</a><a href="/artifacts/new">New artifact</a><a href="/trash">Trash</a><a href="/connections">Connections</a></nav><h1>Your artifacts</h1><ul>${rows.map((row) => `<li><a href="/artifacts/${row.id}">${escapeHtml(row.name)}</a> — ${row.publishedVersionId ? "published" : "private"}</li>`).join("") || "<li>No artifacts yet.</li>"}</ul><p data-csrf="${escapeHtml(token)}"></p></main>`), request);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    const query = new URL(request.url).searchParams;
+    const rawFilter = query.get("filter");
+    const filter = rawFilter === "yours" || rawFilter === "shared" ? rawFilter : "all";
+    const search = query.get("q") ?? "";
+    const rows = await service.listForUser(current.id, filter, search);
+    const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+    const filterLink = (value: string, label: string) => `<a class="${filter === value ? "active" : ""}" href="/artifacts?filter=${value}${search ? `&q=${encodeURIComponent(search)}` : ""}">${label}</a>`;
+    const list = rows.length ? `<ul class="artifact-list">${rows.map((row: ArtifactListItem) => `<li class="artifact-list-item"><div class="section-heading"><a class="title" data-artifact-link="/artifacts/${encodeURIComponent(row.id)}" href="/artifacts/${encodeURIComponent(row.id)}">${escapeHtml(row.name)}</a>${row.pinned ? '<span class="badge">Pinned</span>' : ""}</div><div class="artifact-list-meta">${escapeHtml(row.format)} · ${row.accessRole === "owner" ? "Yours" : `Shared by ${escapeHtml(row.ownerName)} (${escapeHtml(row.ownerEmail)}) · ${row.accessRole === "editor" ? "Editor" : "Viewer"}`} · Updated ${row.updatedAt.toISOString()}</div></li>`).join("")}</ul>` : `<div class="empty-state">${search ? "No Artifacts match your search." : filter === "shared" ? "No Artifacts have been shared with you." : filter === "yours" ? "You don’t have any Artifacts yet." : "No Artifacts yet."}</div>`;
+    return withCsrf(page(`<main><div class="section-heading"><div><p class="eyebrow">Workspace</p><h1>Artifacts</h1></div><a href="/artifacts/new">New artifact</a></div><div class="dashboard-toolbar"><form class="search-form" method="get" action="/artifacts"><input name="q" value="${escapeHtml(search)}" placeholder="Search artifacts" aria-label="Search artifacts"><input type="hidden" name="filter" value="${escapeHtml(filter)}"><button>Search</button></form><div class="filter-tabs">${filterLink("all", "All")}${filterLink("yours", "Yours")}${filterLink("shared", "Shared with you")}</div></div>${list}<nav><a href="/trash">Trash</a><a href="/account">Account</a><a href="/connections">Connections</a></nav><span data-csrf="${escapeHtml(token)}"></span></main>`), request, token);
   });
-  app.get("/artifacts/new", async ({ request }: { request: Request }) => (await sessionUser(auth, request)) ? withCsrf(page(`<main><h1>Upload artifact</h1><p>Supported files: .html, .md, and .txt. Files are private until you publish them.</p><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>Artifact file<input name="file" type="file" accept=".html,.md,.txt,text/html,text/markdown,text/plain" required></label><input type="hidden" name="csrf" value="${escapeHtml(cookies(request)[csrfCookie] ?? "")}"><button>Create private artifact</button></form></main>`), request) : sessionRedirect(config, "/login"));
+  app.get("/artifacts/new", async ({ request }: { request: Request }) => {
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+    return withCsrf(page(`<main><a href="/artifacts">Back to artifacts</a><h1>New artifact</h1><p>Supported files: .html, .md, and .txt. New Artifacts are private until General access changes.</p><form method="post" action="/artifacts" enctype="multipart/form-data"><label>Name<input name="name" required maxlength="200"></label><label>Artifact file<input name="file" type="file" accept=".html,.md,.txt,text/html,text/markdown,text/plain" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Create artifact</button></form></main>`), request, token);
+  });
   app.post("/artifacts", async ({ request }: { request: Request }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
     const form = await request.formData();
     const name = form.get("name");
     const file = form.get("file");
     if (!(file instanceof File)) return new Response("Artifact file required", { status: 400 });
     try {
-      const format = formatFromFilename(file.name);
-      const content = decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes);
-      const created = await service.create(user.id, name, content, format);
+      const created = await service.create(current.id, name, decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes), formatFromFilename(file.name));
       return sessionRedirect(config, `/artifacts/${created.artifact.id}`);
     } catch (error) {
-      if (error instanceof DomainError) return new Response(error.message, { status: error.status });
-      return new Response("Invalid artifact file", { status: 400 });
+      return errorResponse(error);
     }
   });
   app.get("/artifacts/:id", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
+    const current = await sessionUser(auth, request);
     try {
-      const row = await service.get(user.id, params.id);
-      const versions = await service.versionsMeta(user.id, row.id);
-      const shareLinks = await service.shareLinks(user.id, row.id);
-      const token = cookies(request)[csrfCookie] ?? "";
-      const artifactId = encodeURIComponent(row.id);
-      return withCsrf(page(`<main><a href="/artifacts">Back</a><h1>${escapeHtml(row.name)}</h1><p>Format: ${escapeHtml(row.format)} · Created ${row.createdAt.toISOString()}</p><form method="post" action="/artifacts/${artifactId}/rename"><label>Rename<input name="name" value="${escapeHtml(row.name)}" required></label><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rename</button></form>${row.publishedVersionId ? `<div class="preview-actions"><form method="post" action="/artifacts/${artifactId}/unpublish" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Unpublish</button></form><form method="post" action="/artifacts/${artifactId}/rotate" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Rotate share link</button></form></div>` : ""}${renderShareLinkHistory(shareLinks, config, Boolean(row.publishedVersionId))}<div class="section-heading"><h2>Versions</h2><p>${versions.length} version${versions.length === 1 ? "" : "s"}</p></div>${renderVersionTable(row.id, versions, token)}<form method="post" action="/artifacts/${artifactId}/delete"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Delete</button></form></main>`), request);
+      const viewer = await service.getForViewer(current?.id ?? null, params.id);
+      const requestedVersion = new URL(request.url).searchParams.get("version") ?? undefined;
+      const selected = await service.viewerVersion(current?.id ?? null, params.id, requestedVersion);
+      const versions = viewer.access.canBrowseVersions && current ? await service.versionsMetaForViewer(current.id, params.id) : [];
+      const settings = current ? await service.shareSettings(current.id, params.id) : undefined;
+      const pinned = current ? await service.isPinned(current.id, params.id) : false;
+      const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+      const peopleQuery = new URL(request.url).searchParams.get("people") ?? "";
+      const searchResults = current && viewer.access.canManage ? await service.searchInternalUsers(current.id, peopleQuery) : [];
+      const titleMenu = renderTitleMenu(viewer, versions, token, pinned, Boolean(current), selected.version.id);
+      const shareMenu = current ? renderShareMenu(config, viewer, settings?.people ?? [], versions, token, peopleQuery, searchResults) : "";
+      const header = `<div class="artifact-header-actions">${titleMenu}<span class="badge">${escapeHtml(displayAccess(viewer.access.kind))}</span>${shareMenu}</div>`;
+      return withCsrf(artifactPage(artifactPreviewBody(viewer, selected.version.id), header), request, token);
     } catch (error) {
-      if (error instanceof DomainError && error.code === "ARTIFACT_NOT_FOUND") return new Response("Not Found", { status: 404 });
-      return new Response("Internal Server Error", { status: 500 });
+      if (error instanceof DomainError && error.code === "LOGIN_REQUIRED") return sessionRedirect(config, `/login?returnTo=${encodeURIComponent(`/artifacts/${params.id}`)}`);
+      return errorResponse(error, true);
     }
   });
+  app.get("/artifacts/:id/content", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    const current = await sessionUser(auth, request);
+    try {
+      const selected = await service.viewerVersion(current?.id ?? null, params.id, new URL(request.url).searchParams.get("version") ?? undefined);
+      return previewContent(selected.artifact.format, selected.version.content);
+    } catch (error) {
+      return errorResponse(error, true);
+    }
+  });
+  app.get("/artifacts/:id/source", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try {
+      const selected = await service.viewerVersion(current.id, params.id, new URL(request.url).searchParams.get("version") ?? undefined);
+      if (!selected.access.canViewSource) throw new DomainError("SOURCE_FORBIDDEN", "source access forbidden", 403);
+      return sourcePage(`<main class="source-page"><p><a href="/artifacts/${encodeURIComponent(params.id)}?version=${encodeURIComponent(selected.version.id)}">Back to preview</a></p><p class="eyebrow">Source view</p><h1>${escapeHtml(selected.artifact.name)} · Version ${selected.version.ordinal}</h1><pre>${escapeHtml(selected.version.content)}</pre></main>`);
+    } catch (error) {
+      return errorResponse(error, true);
+    }
+  });
+  app.get("/artifacts/:id/download", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try {
+      const selected = await service.viewerVersion(current.id, params.id, new URL(request.url).searchParams.get("version") ?? undefined);
+      if (!selected.access.canDownload) throw new DomainError("DOWNLOAD_FORBIDDEN", "download access forbidden", 403);
+      const filename = downloadName(selected.artifact.name, selected.artifact.format);
+      return new Response(selected.version.content, { headers: artifactHeaders(new Headers({ "Content-Type": contentMimeType(selected.artifact.format), "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}` })) });
+    } catch (error) {
+      return errorResponse(error, true);
+    }
+  });
+  for (const retiredVersionPath of [
+    "/artifacts/:id/versions/:versionId/preview",
+    "/artifacts/:id/versions/:versionId/source",
+    "/artifacts/:id/versions/:versionId/download",
+  ]) {
+    app.get(retiredVersionPath, () => new Response("Not Found", { status: 404 }));
+  }
   app.post("/artifacts/:id/rename", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const form = await request.formData();
-    await service.rename(user.id, params.id, form.get("name"));
-    return sessionRedirect(config, `/artifacts/${params.id}`);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.rename(current.id, params.id, (await request.formData()).get("name")); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
   });
-  app.get("/artifacts/:id/versions/:versionId/download", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const artifact = await service.get(user.id, params.id);
-    const version = await service.version(user.id, params.id, params.versionId);
-    const filename = downloadName(artifact.name, artifact.format);
-    const headers = artifactHeaders(new Headers({
-      "Content-Type": contentMimeType(artifact.format),
-      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-    }));
-    return new Response(version.content, { headers });
-  });
-  app.get("/artifacts/:id/versions/:versionId/content", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return new Response("Not Found", { status: 404, headers: artifactHeaders() });
-    const artifact = await service.get(user.id, params.id);
-    const version = await service.version(user.id, params.id, params.versionId);
-    return previewContent(artifact.format, version.content);
-  });
-  app.get("/artifacts/:id/versions/:versionId/source", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const artifact = await service.get(user.id, params.id);
-    const version = await service.version(user.id, params.id, params.versionId);
-    return sourcePage(`<main><p><a href="/artifacts/${artifact.id}/versions/${version.id}/preview">Back to preview</a></p><h1>${escapeHtml(artifact.name)} source</h1><p>Format: ${escapeHtml(artifact.format)} · Version ${version.ordinal}</p><pre>${escapeHtml(version.content)}</pre></main>`);
-  });
-  app.get("/artifacts/:id/versions/:versionId/preview", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const artifact = await service.get(user.id, params.id);
-    await service.version(user.id, params.id, params.versionId);
-    const artifactId = encodeURIComponent(artifact.id);
-    const versionId = encodeURIComponent(params.versionId);
-    return artifactPage(previewPageBody(artifact.name, `/artifacts/${artifactId}/versions/${versionId}/source`, `/artifacts/${artifactId}`, `/artifacts/${artifactId}/versions/${versionId}/content`, previewSandbox(artifact.format)));
-  });
-  app.post("/artifacts/:id/publish/:versionId", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+  app.post("/artifacts/:id/versions", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const published = await service.publish(user.id, params.id, params.versionId);
-    return page(shareLinkResultPage("Artifact published", "Your artifact is now available at this share link.", absoluteShareUrl(config, published.url), `/artifacts/${encodeURIComponent(params.id)}`));
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) throw new DomainError("ARTIFACT_FILE_REQUIRED", "artifact file required");
+      const parentId = String(form.get("parent_version_id") ?? "");
+      const created = await service.createVersion(current.id, params.id, parentId, decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes), formatFromFilename(file.name), "dashboard");
+      return sessionRedirect(config, `/artifacts/${params.id}?version=${encodeURIComponent(created.version.id)}`);
+    } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/access/:userId", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.grantAccess(current.id, params.id, params.userId, (await request.formData()).get("role")); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/access/:userId/remove", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.removeAccess(current.id, params.id, params.userId); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/leave", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.leaveAccess(current.id, params.id); return sessionRedirect(config, "/artifacts"); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/general-access", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.setGeneralAccess(current.id, params.id, (await request.formData()).get("general_access")); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/shared-version", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.setSharedVersion(current.id, params.id, (await request.formData()).get("version")); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/pin", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.pin(current.id, params.id); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
+  });
+  app.post("/artifacts/:id/unpin", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
+    await verifyMutation(request, config);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.unpin(current.id, params.id); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
   });
   app.post("/artifacts/:id/delete", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    await service.remove(user.id, params.id);
-    return sessionRedirect(config, "/artifacts");
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.remove(current.id, params.id); return sessionRedirect(config, "/artifacts"); } catch (error) { return errorResponse(error); }
   });
   app.get("/trash", async ({ request }: { request: Request }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const rows = await service.trash(user.id);
-    const token = cookies(request)[csrfCookie] ?? "";
-    return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Trash</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name)}<form method="post" action="/artifacts/${row.id}/restore" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Restore</button></form></li>`).join("") || "<li>Trash is empty.</li>"}</ul></main>`), request);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    const rows = await service.trash(current.id);
+    const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+    return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Trash</h1><ul class="artifact-list">${rows.map((row) => `<li class="artifact-list-item"><div class="section-heading"><strong>${escapeHtml(row.name)}</strong><form method="post" action="/artifacts/${encodeURIComponent(row.id)}/restore" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button>Restore</button></form></div><span class="muted">Deleted ${row.deletedAt?.toISOString() ?? ""}</span></li>`).join("") || "<li class=\"empty-state\">Trash is empty.</li>"}</ul></main>`), request, token);
   });
   app.post("/artifacts/:id/restore", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    await service.restore(user.id, params.id);
-    return sessionRedirect(config, `/artifacts/${params.id}`);
-  });
-  app.post("/artifacts/:id/unpublish", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    await service.unpublish(user.id, params.id);
-    return sessionRedirect(config, `/artifacts/${params.id}`);
-  });
-  app.post("/artifacts/:id/rotate", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
-    await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const rotated = await service.rotate(user.id, params.id);
-    return page(shareLinkResultPage("New share link", "The previous link has been revoked. Copy this new link to share the artifact.", absoluteShareUrl(config, rotated.url), `/artifacts/${encodeURIComponent(params.id)}`));
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.restore(current.id, params.id); return sessionRedirect(config, `/artifacts/${params.id}`); } catch (error) { return errorResponse(error); }
   });
   app.get("/connections", async ({ request }: { request: Request }) => {
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    const rows = await service.connections(user.id);
-    const token = cookies(request)[csrfCookie] ?? "";
-    return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Connected applications</h1><ul>${rows.map((row) => `<li>${escapeHtml(row.name ?? row.clientId)} — ${row.disabled ? "revoked" : "active"}<form method="post" action="/connections/${encodeURIComponent(row.clientId)}/revoke" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button ${row.disabled ? "disabled" : ""}>Revoke</button></form></li>`).join("") || "<li>No connected applications.</li>"}</ul></main>`), request);
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    const rows = await service.connections(current.id);
+    const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
+    return withCsrf(page(`<main><nav><a href="/artifacts">Artifacts</a><a href="/account">Account</a></nav><h1>Connected applications</h1><ul class="artifact-list">${rows.map((row) => `<li class="artifact-list-item">${escapeHtml(row.name ?? row.clientId)} — ${row.disabled ? "revoked" : "active"}<form method="post" action="/connections/${encodeURIComponent(row.clientId)}/revoke" class="inline"><input type="hidden" name="csrf" value="${escapeHtml(token)}"><button ${row.disabled ? "disabled" : ""}>Revoke</button></form></li>`).join("") || "<li class=\"empty-state\">No connected applications.</li>"}</ul></main>`), request, token);
   });
   app.post("/connections/:clientId/revoke", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);
-    const user = await sessionUser(auth, request);
-    if (!user) return sessionRedirect(config, "/login");
-    try {
-      await service.revokeClient(user.id, decodeURIComponent(params.clientId));
-    } catch {
-      return new Response("Not Found", { status: 404 });
-    }
+    const current = await sessionUser(auth, request);
+    if (!current) return sessionRedirect(config, "/login");
+    try { await service.revokeClient(current.id, decodeURIComponent(params.clientId)); } catch { return new Response("Not Found", { status: 404 }); }
     return sessionRedirect(config, "/connections");
-  });
-  app.get("/s/:token", async ({ params }: { params: Record<string, string> }) => {
-    try {
-      const shared = await service.shared(params.token);
-      const token = encodeURIComponent(params.token);
-      return artifactPage(previewPageBody(shared.artifact.name, `/s/${token}/source`, "/", `/s/${token}/content`, previewSandbox(shared.artifact.format)));
-    } catch (error) {
-      const status = error instanceof DomainError ? error.status : 404;
-      return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });
-    }
-  });
-  app.get("/s/:token/content", async ({ params }: { params: Record<string, string> }) => {
-    try {
-      const shared = await service.shared(params.token);
-      return previewContent(shared.artifact.format, shared.version.content);
-    } catch (error) {
-      const status = error instanceof DomainError ? error.status : 404;
-      return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });
-    }
-  });
-  app.get("/s/:token/source", async ({ params }: { params: Record<string, string> }) => {
-    try {
-      const shared = await service.shared(params.token);
-      return new Response(`<!doctype html><html><head>${robotsMeta()}<meta charset="utf-8"><title>Shared artifact source</title></head><body><main><p><a href="/s/${params.token}">Back to preview</a></p><h1>${escapeHtml(shared.artifact.name)} source</h1><p>Format: ${escapeHtml(shared.artifact.format)} · Version ${shared.version.ordinal}</p><pre>${escapeHtml(shared.version.content)}</pre></main></body></html>`, { headers: artifactHeaders(new Headers({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'" })) });
-    } catch (error) {
-      const status = error instanceof DomainError ? error.status : 404;
-      return new Response(status === 410 ? "Gone" : "Not Found", { status, headers: artifactHeaders() });
-    }
   });
   return app;
 }

@@ -1,6 +1,6 @@
 # Keep one stable format per artifact
 
-**Status: accepted.** Portifact will keep a single format for the lifetime of an artifact: versions can change content but cannot change between HTML, Markdown, and plain text. HTML remains the format for interactive artifacts; Markdown and plain text are document artifacts. If content must change format, it becomes a new artifact. This keeps the preview, security boundary, download contract, and share link semantics stable across versions while allowing Portifact to support documents without prematurely adopting Claude Artifacts' larger app-runtime and collaboration surface.
+**Status: accepted.** Portifact will keep a single format for the lifetime of an artifact: versions can change content but cannot change between HTML, Markdown, and plain text. HTML remains the format for interactive artifacts; Markdown and plain text are document artifacts. If content must change format, it becomes a new artifact. This keeps the preview, security boundary, download contract, and Artifact link semantics stable across versions while allowing Portifact to support documents without prematurely adopting Claude Artifacts' larger app-runtime and collaboration surface.
 
 ## Considered options
 

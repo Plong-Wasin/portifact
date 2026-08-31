@@ -16,7 +16,7 @@ describe("loadConfig", () => {
     const config = loadConfig(base);
     expect(config.registrationEnabled).toBe(false);
     expect(config.maxContentBytes).toBe(1048576);
-    expect(config.requiredMigrationVersion).toBe(7);
+    expect(config.requiredMigrationVersion).toBe(8);
     expect(config.microsoft).toBeUndefined();
     expect(config.sentryDsn).toBeUndefined();
     expect(config.sentryRelease).toBeUndefined();
@@ -60,7 +60,6 @@ describe("loadConfig", () => {
       ...base,
       APP_ENV: "production",
       APP_URL: "https://portifact.example.com",
-      SHARE_LINK_ENCRYPTION_KEY: "share-link-secret",
       MICROSOFT_CLIENT_ID: "client-id",
       MICROSOFT_CLIENT_SECRET: "client-secret",
       MICROSOFT_TENANT_ID: "11111111-2222-3333-4444-555555555555",

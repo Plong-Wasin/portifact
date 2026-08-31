@@ -50,6 +50,13 @@
       "when": 1787429813074,
       "tag": "0006_drop_legacy_html_column",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0007_artifact_access_model",
+      "breakpoints": true
     }
   ]
 }

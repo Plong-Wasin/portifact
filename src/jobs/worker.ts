@@ -31,8 +31,8 @@ async function claimJob(db: Database, now: Date): Promise<typeof job.$inferSelec
   return claimed;
 }
 
-// Idempotent permanent purge: deleting the artifact cascades to versions, share
-// links, and this job (FK ondelete cascade). Re-running after a partial failure
+// Idempotent permanent purge: deleting the artifact cascades to versions,
+// access grants, pins, and this job (FK ondelete cascade). Re-running after a partial failure
 // is safe — the row is already gone.
 async function runJob(db: Database, row: typeof job.$inferSelect): Promise<void> {
   if (row.kind === "purge_artifact") {

@@ -21,7 +21,7 @@ import { createNoopErrorTelemetry, type ErrorTelemetry } from "./telemetry";
 import { errorCodeOf, errorStatusOf } from "./error-utils";
 
 const protocolVersion = "2026-07-28";
-const scopes = ["artifacts:read", "artifacts:write", "artifacts:publish"] as const;
+const scopes = ["artifacts:read", "artifacts:write"] as const;
 
 type TokenVerifier = {
   verifyAccessToken: (token: string) => Promise<AuthInfo>;
@@ -265,10 +265,22 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
       "list_artifacts",
       { inputSchema: z.object({ include_deleted: z.boolean().optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(50).optional() }) },
       async ({ include_deleted, cursor: rawCursor, limit }) => invoke(context, "list_artifacts", "artifacts:read", async () => {
-        const rows = await service.list(ownerId, include_deleted);
+        const rows = include_deleted ? await service.list(ownerId, true) : await service.listForUser(ownerId);
         const startId = cursor(rawCursor);
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
-        const page = rows.slice(start, start + (limit ?? 50)).map(({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }) => ({ id, name, format, latestVersionId, publishedVersionId, deletedAt, createdAt, updatedAt }));
+        const page = rows.slice(start, start + (limit ?? 50)).map((row) => ({
+          id: row.id,
+          ownerId: row.ownerId,
+          name: row.name,
+          format: row.format,
+          latestVersionId: row.latestVersionId,
+          generalAccess: row.generalAccess,
+          sharedVersionId: row.sharedVersionId,
+          accessRole: "accessRole" in row ? row.accessRole : "owner",
+          deletedAt: row.deletedAt,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
       }, telemetry),
     );
@@ -276,18 +288,21 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
     server.registerTool(
       "get_artifact",
       { inputSchema: z.object({ artifact_id: z.string() }) },
-      async ({ artifact_id }) => invoke(context, "get_artifact", "artifacts:read", async () => service.get(ownerId, artifact_id), telemetry),
+      async ({ artifact_id }) => invoke(context, "get_artifact", "artifacts:read", async () => {
+        const viewer = await service.getForViewer(ownerId, artifact_id);
+        return { ...viewer.artifact, access: viewer.access };
+      }, telemetry),
     );
 
     server.registerTool(
       "list_versions",
       { inputSchema: z.object({ artifact_id: z.string(), cursor: z.string().optional(), limit: z.number().int().min(1).max(50).optional() }) },
       async ({ artifact_id, cursor: rawCursor, limit }) => invoke(context, "list_versions", "artifacts:read", async () => {
-        const artifact = await service.get(ownerId, artifact_id);
-        const rows = await service.versionsMeta(ownerId, artifact_id);
+        const viewer = await service.getForViewer(ownerId, artifact_id);
+        const rows = await service.versionsMetaForViewer(ownerId, artifact_id);
         const startId = cursor(rawCursor);
         const start = startId ? Math.max(rows.findIndex((row) => row.id === startId) + 1, 0) : 0;
-        const page = rows.slice(start, start + (limit ?? 50)).map((version) => ({ ...version, format: artifact.format }));
+        const page = rows.slice(start, start + (limit ?? 50)).map((version) => ({ ...version, format: viewer.artifact.format }));
         return { items: page, next_cursor: start + page.length < rows.length ? nextCursor(page.at(-1)?.id) : undefined };
       }, telemetry),
     );
@@ -296,9 +311,10 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
       "get_version",
       { inputSchema: z.object({ artifact_id: z.string(), version_id: z.string() }) },
       async ({ artifact_id, version_id }) => invoke(context, "get_version", "artifacts:read", async () => {
-        const artifact = await service.get(ownerId, artifact_id);
-        const version = await service.version(ownerId, artifact_id, version_id);
-        return { ...version, format: artifact.format };
+        const viewer = await service.getForViewer(ownerId, artifact_id);
+        if (!viewer.access.canDownload) return toolError("DOWNLOAD_FORBIDDEN");
+        const version = await service.versionForViewer(ownerId, artifact_id, version_id);
+        return { ...version, format: viewer.artifact.format };
       }, telemetry),
     );
 
@@ -312,12 +328,6 @@ export function registerMcp(app: any, db: Database, config: Config, auth?: Auth,
       "create_version",
       { inputSchema: z.object({ artifact_id: z.string(), parent_version_id: z.string(), content: z.string(), format: z.enum(ARTIFACT_FORMATS), idempotency_key: z.string().min(1).optional() }) },
       async (input) => invoke(context, "create_version", "artifacts:write", async () => idempotent(db, config, context, "create_version", input, () => service.createVersion(ownerId, input.artifact_id, input.parent_version_id, input.content, input.format)), telemetry),
-    );
-
-    server.registerTool(
-      "publish_version",
-      { inputSchema: z.object({ artifact_id: z.string(), version_id: z.string(), idempotency_key: z.string().min(1).optional() }) },
-      async (input) => invoke(context, "publish_version", "artifacts:publish", async () => idempotent(db, config, context, "publish_version", input, () => service.publish(ownerId, input.artifact_id, input.version_id)), telemetry),
     );
 
     return server;

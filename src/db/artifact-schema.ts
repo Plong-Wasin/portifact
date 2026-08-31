@@ -1,7 +1,7 @@
-import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema";
 import { ARTIFACT_FORMATS } from "../artifacts/content";
+import { ARTIFACT_ACCESS_ROLES, GENERAL_ACCESS_MODES } from "../artifacts/domain";
 
 export const oauthApplication = pgTable("oauth_application", {
   id: text("id").primaryKey().notNull(),
@@ -66,7 +66,8 @@ export const artifact = pgTable("artifact", {
   name: text("name").notNull(),
   format: text("format", { enum: ARTIFACT_FORMATS }).notNull(),
   latestVersionId: text("latest_version_id"),
-  publishedVersionId: text("published_version_id"),
+  generalAccess: text("general_access", { enum: GENERAL_ACCESS_MODES }).default("only_people_with_access").notNull(),
+  sharedVersionId: text("shared_version_id"),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   purgeAfter: timestamp("purge_after", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -86,16 +87,27 @@ export const artifactVersion = pgTable("artifact_version", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => ({ artifactOrdinal: uniqueIndex("artifact_version_artifact_ordinal_idx").on(table.artifactId, table.ordinal) }));
 
-export const shareLink = pgTable("share_link", {
+export const artifactAccess = pgTable("artifact_access", {
   id: text("id").primaryKey().notNull(),
   artifactId: text("artifact_id").notNull().references(() => artifact.id, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull(),
-  encryptedToken: text("encrypted_token").notNull(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  role: text("role", { enum: ARTIFACT_ACCESS_ROLES }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => ({
+  artifactUserUnique: uniqueIndex("artifact_access_artifact_user_idx").on(table.artifactId, table.userId),
+  artifactIndex: index("artifact_access_artifact_idx").on(table.artifactId),
+  userIndex: index("artifact_access_user_idx").on(table.userId),
+}));
+
+export const artifactPin = pgTable("artifact_pin", {
+  id: text("id").primaryKey().notNull(),
+  artifactId: text("artifact_id").notNull().references(() => artifact.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => ({
-  artifactActiveUnique: uniqueIndex("share_link_artifact_active_idx").on(table.artifactId).where(sql`${table.revokedAt} is null`),
-  tokenUnique: uniqueIndex("share_link_token_idx").on(table.tokenHash),
+  artifactUserUnique: uniqueIndex("artifact_pin_artifact_user_idx").on(table.artifactId, table.userId),
+  userIndex: index("artifact_pin_user_idx").on(table.userId),
 }));
 
 export const job = pgTable("job", {
@@ -124,4 +136,5 @@ export const idempotencyKey = pgTable("idempotency_key", {
 
 export type Artifact = typeof artifact.$inferSelect;
 export type ArtifactVersion = typeof artifactVersion.$inferSelect;
-export type ShareLink = typeof shareLink.$inferSelect;
+export type ArtifactAccess = typeof artifactAccess.$inferSelect;
+export type ArtifactPin = typeof artifactPin.$inferSelect;
