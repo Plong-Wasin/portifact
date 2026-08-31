@@ -317,6 +317,7 @@ export class ArtifactService {
 
   async removeAccess(ownerId: string, artifactId: string, targetUserId: string) {
     await this.get(ownerId, artifactId);
+    if (targetUserId === ownerId) throw new DomainError("OWNER_ACCESS_IMMUTABLE", "owner access cannot be changed", 409);
     await this.db.delete(artifactAccess).where(and(eq(artifactAccess.artifactId, artifactId), eq(artifactAccess.userId, targetUserId)));
   }
 
@@ -375,10 +376,15 @@ export class ArtifactService {
   }
 
   async restore(ownerId: string, artifactId: string) {
-    await this.get(ownerId, artifactId, true);
+    const current = await this.get(ownerId, artifactId, true);
+    if (!current.deletedAt) throw new DomainError("ARTIFACT_NOT_IN_TRASH", "artifact is not in trash", 409);
     await this.db.transaction(async (tx) => {
-      await tx.update(artifact).set({ deletedAt: null, purgeAfter: null, generalAccess: "only_people_with_access", sharedVersionId: null, updatedAt: now() }).where(and(eq(artifact.ownerId, ownerId), eq(artifact.id, artifactId)));
-      await tx.delete(job).where(and(eq(job.artifactId, artifactId), eq(job.kind, "purge_artifact"), eq(job.status, "pending")));
+      const [locked] = await tx.select({ id: artifact.id, deletedAt: artifact.deletedAt }).from(artifact)
+        .where(and(eq(artifact.ownerId, ownerId), eq(artifact.id, artifactId))).for("update");
+      if (!locked) return notFound();
+      if (!locked.deletedAt) throw new DomainError("ARTIFACT_NOT_IN_TRASH", "artifact is not in trash", 409);
+      await tx.delete(job).where(and(eq(job.artifactId, artifactId), eq(job.kind, "purge_artifact"), inArray(job.status, ["pending", "running"])));
+      await tx.update(artifact).set({ deletedAt: null, purgeAfter: null, generalAccess: "only_people_with_access", sharedVersionId: null, updatedAt: now() }).where(eq(artifact.id, artifactId));
     });
     return this.get(ownerId, artifactId);
   }

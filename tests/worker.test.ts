@@ -16,9 +16,29 @@ function recordingTelemetry() {
 // Fake DB for the worker tick: returns configurable job rows and records
 // side effects so we can assert claim/run/fail behaviour without PostgreSQL.
 function fakeDb(rows: any[], records: { deletes: any[]; updates: any[] }) {
-  const selectResult = rows;
-  return {
-    select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => selectResult }) }) }) }),
+  let selectCalls = 0;
+  const db = {
+    select: () => {
+      selectCalls += 1;
+      return {
+        from: () => {
+          const result = selectCalls === 1
+            ? rows
+            : selectCalls === 2
+              ? rows.map((row) => ({ id: row.artifactId, deletedAt: row.createdAt }))
+              : selectCalls === 3
+                ? rows.map((row) => ({ status: "running" }))
+                : [];
+          const chain = {
+            where: () => chain,
+            orderBy: () => chain,
+            limit: () => result,
+            for: () => result,
+          };
+          return chain;
+        },
+      };
+    },
     update: (table: any) => ({
       set: (values: any) => ({
         where: () => ({
@@ -27,7 +47,9 @@ function fakeDb(rows: any[], records: { deletes: any[]; updates: any[] }) {
       }),
     }),
     delete: (table: any) => ({ where: async () => { records.deletes.push(table); } }),
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(db),
   } as never;
+  return db;
 }
 
 describe("worker tick", () => {

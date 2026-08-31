@@ -49,7 +49,7 @@ describe.skipIf(!DSN)("artifact access lifecycle", () => {
   });
 
   test("delete makes access unavailable and restore returns the artifact as private", async () => {
-    const { sql, service, ownerId, viewerId } = await setup();
+    const { db, sql, service, ownerId, viewerId } = await setup();
     try {
       const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
       await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
@@ -57,11 +57,53 @@ describe.skipIf(!DSN)("artifact access lifecycle", () => {
       await service.remove(ownerId, created.artifact.id);
       await expect(service.getForViewer(viewerId, created.artifact.id)).rejects.toThrow();
 
+      const { job } = await import("../src/db/schema");
+      const [purgeJob] = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
+      expect(purgeJob?.status).toBe("pending");
       await service.restore(ownerId, created.artifact.id);
+      const [cancelledJob] = await db.select().from(job).where(eq(job.id, purgeJob!.id));
+      expect(cancelledJob).toBeUndefined();
       const restored = await service.get(ownerId, created.artifact.id);
       expect(restored.generalAccess).toBe("only_people_with_access");
       expect((await service.getForViewer(viewerId, created.artifact.id)).access.kind).toBe("viewer");
       await expect(service.getForViewer(null, created.artifact.id)).rejects.toThrow();
+    } finally {
+      await sql.close();
+    }
+  });
+
+  test("does not restore an active artifact or change its access settings", async () => {
+    const { sql, service, ownerId } = await setup();
+    try {
+      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
+      await service.setGeneralAccess(ownerId, created.artifact.id, "anyone_with_the_link");
+
+      await expect(service.restore(ownerId, created.artifact.id)).rejects.toMatchObject({ code: "ARTIFACT_NOT_IN_TRASH" });
+      expect((await service.get(ownerId, created.artifact.id)).generalAccess).toBe("anyone_with_the_link");
+    } finally {
+      await sql.close();
+    }
+  });
+
+  test("does not let a stale purge job delete a later deletion", async () => {
+    const { db, sql, service, ownerId } = await setup();
+    try {
+      const { artifact, job } = await import("../src/db/schema");
+      const { tick } = await import("../src/jobs/worker");
+      const created = await service.create(ownerId, "doc", "<p>x</p>", "html");
+      await service.remove(ownerId, created.artifact.id);
+      const [oldJob] = await db.select().from(job).where(eq(job.artifactId, created.artifact.id));
+      await service.restore(ownerId, created.artifact.id);
+      await db.insert(job).values({ ...oldJob!, status: "pending", scheduledAt: new Date(0), lockedAt: null });
+      await service.remove(ownerId, created.artifact.id);
+
+      // Re-queue the old job to model a stale worker lease from the first deletion.
+      await tick(db);
+
+      const [stillDeleted] = await db.select({ deletedAt: artifact.deletedAt }).from(artifact).where(eq(artifact.id, created.artifact.id));
+      const [staleJob] = await db.select({ status: job.status }).from(job).where(eq(job.id, oldJob!.id));
+      expect(stillDeleted?.deletedAt).not.toBeNull();
+      expect(staleJob).toBeUndefined();
     } finally {
       await sql.close();
     }
@@ -81,6 +123,7 @@ describe.skipIf(!DSN)("artifact access lifecycle", () => {
       await service.setSharedVersion(ownerId, created.artifact.id, v1.id);
       await service.grantAccess(ownerId, created.artifact.id, editorId, "editor");
       await service.grantAccess(ownerId, created.artifact.id, viewerId, "viewer");
+      await expect(service.removeAccess(ownerId, created.artifact.id, ownerId)).rejects.toMatchObject({ code: "OWNER_ACCESS_IMMUTABLE" });
 
       expect((await service.viewerVersion(editorId, created.artifact.id, v2.id)).version.id).toBe(v2.id);
       expect((await service.viewerVersion(viewerId, created.artifact.id, v2.id)).version.id).toBe(v2.id);

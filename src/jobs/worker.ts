@@ -32,11 +32,25 @@ async function claimJob(db: Database, now: Date): Promise<typeof job.$inferSelec
 }
 
 // Idempotent permanent purge: deleting the artifact cascades to versions,
-// access grants, pins, and this job (FK ondelete cascade). Re-running after a partial failure
-// is safe — the row is already gone.
+// access grants, pins, and this job (FK ondelete cascade). The job and deletion timestamp
+// are checked in the same transaction so a restored/re-deleted artifact cannot be removed
+// by a stale worker lease.
 async function runJob(db: Database, row: typeof job.$inferSelect): Promise<void> {
   if (row.kind === "purge_artifact") {
-    if (row.artifactId) await db.delete(artifact).where(eq(artifact.id, row.artifactId));
+    if (!row.artifactId) return;
+    await db.transaction(async (tx) => {
+      const [currentArtifact] = await tx.select({ id: artifact.id, deletedAt: artifact.deletedAt }).from(artifact)
+        .where(eq(artifact.id, row.artifactId!)).for("update");
+      const [currentJob] = await tx.select({ status: job.status }).from(job).where(eq(job.id, row.id)).for("update");
+      if (!currentJob || currentJob.status !== "running") return;
+      if (!currentArtifact || currentArtifact.deletedAt?.getTime() !== row.createdAt.getTime()) {
+        // A restore or a newer delete superseded this job. Do not leave a stale
+        // running row behind, and never delete the newer artifact state.
+        await tx.delete(job).where(eq(job.id, row.id));
+        return;
+      }
+      await tx.delete(artifact).where(eq(artifact.id, currentArtifact.id));
+    });
     return;
   }
   throw new Error(`unknown job kind: ${row.kind}`);
