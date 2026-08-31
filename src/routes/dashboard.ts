@@ -106,7 +106,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .empty-state, .notice { padding: 1.15rem; color: var(--muted); background: var(--surface-muted); border: 1px dashed #cbd5e1; border-radius: 1rem; }
 .error-state { padding: 1.15rem; color: #991b1b; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 1rem; }
 .error-inline { color: #991b1b; font-size: .8rem; font-weight: 700; }
-.artifact-site-header { max-width: none; padding: .55rem clamp(1rem, 3vw, 2rem); background: rgba(255,255,255,.78); border-bottom: 1px solid rgba(226,232,240,.9); box-shadow: 0 4px 18px rgba(30,41,59,.05); backdrop-filter: blur(14px); }
+.artifact-site-header { position: relative; z-index: 30; max-width: none; padding: .55rem clamp(1rem, 3vw, 2rem); background: rgba(255,255,255,.78); border-bottom: 1px solid rgba(226,232,240,.9); box-shadow: 0 4px 18px rgba(30,41,59,.05); backdrop-filter: blur(14px); }
 .artifact-site-header .brand-note { display: none; }
 .artifact-header-actions { min-width: 0; flex: 1; justify-content: flex-end; }
 .menu { position: relative; }
@@ -147,7 +147,7 @@ pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
   .site-header { align-items: flex-start; padding-inline: 1rem; }
   .page-content { padding: .75rem 1rem 2rem; }
   main { margin: .75rem auto; border-radius: 1.25rem; }
-  .artifact-site-header { align-items: center; padding: .5rem .75rem; }
+  .artifact-site-header { align-items: center; padding: .5rem .75rem; backdrop-filter: none; }
   .artifact-site-header .brand { flex: 0 0 auto; }
   .artifact-header-actions { gap: .35rem; }
   .menu summary { max-width: 44vw; padding-inline: .45rem; }
