@@ -25,4 +25,7 @@ CREATE UNIQUE INDEX "artifact_pin_artifact_user_idx" ON "artifact_pin" USING btr
 CREATE INDEX "artifact_pin_user_idx" ON "artifact_pin" USING btree ("user_id");--> statement-breakpoint
 DROP TABLE "share_link";--> statement-breakpoint
 ALTER TABLE "artifact" DROP COLUMN "published_version_id";--> statement-breakpoint
+ALTER TABLE "artifact_version" ALTER COLUMN "creator_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "artifact_version" DROP CONSTRAINT "artifact_version_creator_id_user_id_fk";--> statement-breakpoint
+ALTER TABLE "artifact_version" ADD CONSTRAINT "artifact_version_creator_id_user_id_fk" FOREIGN KEY ("creator_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 UPDATE "schema_meta" SET "version" = 8, "updated_at" = now() WHERE "id" = 1;

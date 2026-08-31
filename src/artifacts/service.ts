@@ -172,21 +172,21 @@ export class ArtifactService {
 
   async versionsMeta(ownerId: string, artifactId: string, includeDeleted = false) {
     await this.get(ownerId, artifactId, includeDeleted);
-    return this.db.select({
-      id: artifactVersion.id, artifactId: artifactVersion.artifactId, parentVersionId: artifactVersion.parentVersionId,
-      ordinal: artifactVersion.ordinal, byteSize: artifactVersion.byteSize, digest: artifactVersion.digest,
-      source: artifactVersion.source, creatorId: artifactVersion.creatorId, createdAt: artifactVersion.createdAt,
-    }).from(artifactVersion).where(eq(artifactVersion.artifactId, artifactId)).orderBy(asc(artifactVersion.ordinal));
+    return this.versionMetadata(artifactId);
   }
 
   async versionsMetaForViewer(userId: string, artifactId: string) {
     const viewer = await this.getForViewer(userId, artifactId);
     if (!viewer.access.canBrowseVersions) return forbidden("VERSION_HISTORY_FORBIDDEN");
+    return this.versionMetadata(viewer.artifact.id);
+  }
+
+  private async versionMetadata(artifactId: string) {
     return this.db.select({
       id: artifactVersion.id, artifactId: artifactVersion.artifactId, parentVersionId: artifactVersion.parentVersionId,
       ordinal: artifactVersion.ordinal, byteSize: artifactVersion.byteSize, digest: artifactVersion.digest,
       source: artifactVersion.source, creatorId: artifactVersion.creatorId, createdAt: artifactVersion.createdAt,
-    }).from(artifactVersion).where(eq(artifactVersion.artifactId, viewer.artifact.id)).orderBy(asc(artifactVersion.ordinal));
+    }).from(artifactVersion).where(eq(artifactVersion.artifactId, artifactId)).orderBy(asc(artifactVersion.ordinal));
   }
 
   async version(ownerId: string, artifactId: string, versionId: string, includeDeleted = false) {
@@ -341,8 +341,8 @@ export class ArtifactService {
       if (current.sharedVersionId !== null) await this.db.update(artifact).set({ sharedVersionId: null, updatedAt: now() }).where(eq(artifact.id, artifactId));
       return this.get(ownerId, artifactId);
     }
-    const value = typeof versionInput === "string" ? versionInput : "latest";
-    const selected = value === "latest" || value === "" ? null : await this.versionById(artifactId, value);
+    const sharedVersionSelection = typeof versionInput === "string" ? versionInput : "latest";
+    const selected = sharedVersionSelection === "latest" || sharedVersionSelection === "" ? null : await this.versionById(artifactId, sharedVersionSelection);
     await this.db.update(artifact).set({ sharedVersionId: selected ? selected.id : null, updatedAt: now() }).where(and(eq(artifact.id, artifactId), eq(artifact.ownerId, ownerId), isNull(artifact.deletedAt)));
     return this.get(ownerId, artifactId);
   }

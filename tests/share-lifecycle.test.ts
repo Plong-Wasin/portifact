@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { config } from "./helpers";
 
 const DSN = Bun.env.TEST_DATABASE_URL;
@@ -104,6 +105,26 @@ describe.skipIf(!DSN)("artifact access lifecycle", () => {
       await service.pin(viewerId, created.artifact.id);
       expect((await service.listForUser(viewerId, "all"))[0]?.pinned).toBe(true);
       expect((await service.listForUser(ownerId, "all"))[0]?.pinned).toBe(false);
+    } finally {
+      await sql.close();
+    }
+  });
+
+  test("preserves version history when a contributor is deleted", async () => {
+    const { db, sql, service, ownerId } = await setup();
+    try {
+      const { user } = await import("../src/db/schema");
+      const contributorId = crypto.randomUUID();
+      const now = new Date();
+      await db.insert(user).values({ id: contributorId, name: "contributor", email: `${contributorId}@test.local`, emailVerified: false, createdAt: now, updatedAt: now });
+      const created = await service.create(ownerId, "doc", "<p>v1</p>", "html");
+      await service.grantAccess(ownerId, created.artifact.id, contributorId, "editor");
+      const version = (await service.createVersion(contributorId, created.artifact.id, created.version.id, "<p>v2</p>", "html")).version;
+
+      await db.delete(user).where(eq(user.id, contributorId));
+
+      const history = await service.versionsMeta(ownerId, created.artifact.id);
+      expect(history.find((item) => item.id === version.id)?.creatorId).toBeNull();
     } finally {
       await sql.close();
     }

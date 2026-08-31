@@ -105,6 +105,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .badge { display: inline-flex; width: fit-content; align-items: center; padding: .18rem .55rem; color: var(--primary-dark); font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: var(--primary-soft); border-radius: 999px; }
 .empty-state, .notice { padding: 1.15rem; color: var(--muted); background: var(--surface-muted); border: 1px dashed #cbd5e1; border-radius: 1rem; }
 .error-state { padding: 1.15rem; color: #991b1b; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 1rem; }
+.error-inline { color: #991b1b; font-size: .8rem; font-weight: 700; }
 .artifact-site-header { max-width: none; padding: .55rem clamp(1rem, 3vw, 2rem); background: rgba(255,255,255,.78); border-bottom: 1px solid rgba(226,232,240,.9); box-shadow: 0 4px 18px rgba(30,41,59,.05); backdrop-filter: blur(14px); }
 .artifact-site-header .brand-note { display: none; }
 .artifact-header-actions { min-width: 0; flex: 1; justify-content: flex-end; }
@@ -327,7 +328,7 @@ function renderTitleMenu(viewer: ArtifactViewer, versions: Array<{ id: string; o
     ? `<div class="menu-section"><h3>Current version</h3>${viewer.access.canViewSource ? `<a class="menu-item" href="/artifacts/${artifactId}/source?version=${encodeURIComponent(selectedVersionId)}">View source</a>` : ""}${viewer.access.canDownload ? `<a class="menu-item" href="/artifacts/${artifactId}/download?version=${encodeURIComponent(selectedVersionId)}">Download</a>` : ""}</div>`
     : "";
   const upload = viewer.access.canContribute
-    ? `<div class="menu-section"><h3>New version</h3><form method="post" action="/artifacts/${artifactId}/versions" enctype="multipart/form-data"><label>Upload ${escapeHtml(viewer.artifact.format)} file<input name="file" type="file" required></label><input type="hidden" name="parent_version_id" value="${escapeHtml(viewer.artifact.latestVersionId ?? "")}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Upload new version</button></form></div>`
+    ? `<div class="menu-section"><h3>New version</h3><form method="post" action="/artifacts/${artifactId}/versions" enctype="multipart/form-data"><label>Upload ${escapeHtml(viewer.artifact.format)} file<input name="file" type="file" required></label><input type="hidden" name="parent_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="view_version_id" value="${escapeHtml(selectedVersionId)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Upload new version</button></form></div>`
     : "";
   const rename = viewer.access.canManage
     ? `<div class="menu-section"><h3>Rename</h3><form method="post" action="/artifacts/${artifactId}/rename"><label>Artifact name<input name="name" value="${escapeHtml(viewer.artifact.name)}" required maxlength="200"></label><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button>Save name</button></form></div>`
@@ -379,6 +380,30 @@ function errorResponse(error: unknown, artifactResponse = false): Response {
   if (status === 500) return new Response("Internal Server Error", { status, headers });
   return new Response(message, { status, headers });
 }
+
+function uploadErrorMessage(code: string): string {
+  return ({
+    ARTIFACT_FILE_REQUIRED: "Choose a file to upload.",
+    ARTIFACT_FORMAT_MISMATCH: "The uploaded file must use the same format as this Artifact.",
+    EMPTY_CONTENT: "The uploaded file is empty.",
+    CONTENT_TOO_LARGE: "The uploaded file is too large.",
+    USER_STORAGE_LIMIT_EXCEEDED: "Your Artifact storage limit would be exceeded by this upload.",
+    UNSUPPORTED_ARTIFACT_FORMAT: "That file format is not supported.",
+    INVALID_CONTENT_ENCODING: "The uploaded file must contain valid UTF-8 text.",
+    VERSION_CONFLICT: "This Artifact has a newer Version. Refresh the Preview and try again.",
+  } as Record<string, string>)[code] ?? "We could not upload that Version. Check the file and try again.";
+}
+
+const UPLOAD_ERROR_CODES = new Set([
+  "ARTIFACT_FILE_REQUIRED",
+  "ARTIFACT_FORMAT_MISMATCH",
+  "EMPTY_CONTENT",
+  "CONTENT_TOO_LARGE",
+  "INVALID_CONTENT_ENCODING",
+  "UNSUPPORTED_ARTIFACT_FORMAT",
+  "USER_STORAGE_LIMIT_EXCEEDED",
+  "VERSION_CONFLICT",
+]);
 
 export function registerDashboardRoutes(app: any, db: Database, config: Config, auth?: Auth) {
   const service = new ArtifactService(db, config);
@@ -455,18 +480,21 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   app.get("/artifacts/:id", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     const current = await sessionUser(auth, request);
     try {
+      const query = new URL(request.url).searchParams;
       const viewer = await service.getForViewer(current?.id ?? null, params.id);
-      const requestedVersion = new URL(request.url).searchParams.get("version") ?? undefined;
+      const requestedVersion = query.get("version") ?? undefined;
       const selected = await service.viewerVersion(current?.id ?? null, params.id, requestedVersion);
       const versions = viewer.access.canBrowseVersions && current ? await service.versionsMetaForViewer(current.id, params.id) : [];
       const settings = current ? await service.shareSettings(current.id, params.id) : undefined;
       const pinned = current ? await service.isPinned(current.id, params.id) : false;
       const token = cookies(request)[csrfCookie] ?? crypto.randomUUID();
-      const peopleQuery = new URL(request.url).searchParams.get("people") ?? "";
+      const peopleQuery = query.get("people") ?? "";
       const searchResults = current && viewer.access.canManage ? await service.searchInternalUsers(current.id, peopleQuery) : [];
       const titleMenu = renderTitleMenu(viewer, versions, token, pinned, Boolean(current), selected.version.id);
-      const shareMenu = current ? renderShareMenu(config, viewer, settings?.people ?? [], versions, token, peopleQuery, searchResults) : "";
-      const header = `<div class="artifact-header-actions">${titleMenu}<span class="badge">${escapeHtml(displayAccess(viewer.access.kind))}</span>${shareMenu}</div>`;
+      const shareMenu = renderShareMenu(config, viewer, settings?.people ?? [], versions, token, peopleQuery, searchResults);
+      const uploadErrorCode = query.get("upload_error");
+      const uploadError = uploadErrorCode ? `<span class="error-inline" role="alert">${escapeHtml(uploadErrorMessage(uploadErrorCode))}</span>` : "";
+      const header = `<div class="artifact-header-actions">${uploadError}${titleMenu}<span class="badge">${escapeHtml(displayAccess(viewer.access.kind))}</span>${shareMenu}</div>`;
       return withCsrf(artifactPage(artifactPreviewBody(viewer, selected.version.id), header), request, token);
     } catch (error) {
       if (error instanceof DomainError && error.code === "LOGIN_REQUIRED") return sessionRedirect(config, `/login?returnTo=${encodeURIComponent(`/artifacts/${params.id}`)}`);
@@ -522,14 +550,22 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
     await verifyMutation(request, config);
     const current = await sessionUser(auth, request);
     if (!current) return sessionRedirect(config, "/login");
+    let viewVersionId = "";
     try {
       const form = await request.formData();
+      const parentId = String(form.get("parent_version_id") ?? "");
+      viewVersionId = String(form.get("view_version_id") ?? parentId);
       const file = form.get("file");
       if (!(file instanceof File)) throw new DomainError("ARTIFACT_FILE_REQUIRED", "artifact file required");
-      const parentId = String(form.get("parent_version_id") ?? "");
       const created = await service.createVersion(current.id, params.id, parentId, decodeContent(new Uint8Array(await file.arrayBuffer()), config.maxContentBytes), formatFromFilename(file.name), "dashboard");
       return sessionRedirect(config, `/artifacts/${params.id}?version=${encodeURIComponent(created.version.id)}`);
-    } catch (error) { return errorResponse(error); }
+    } catch (error) {
+      const domainError = error instanceof DomainError ? error : null;
+      if (!domainError || !UPLOAD_ERROR_CODES.has(domainError.code)) return errorResponse(error);
+      const code = domainError.code;
+      const query = viewVersionId ? `?version=${encodeURIComponent(viewVersionId)}&upload_error=${encodeURIComponent(code)}` : `?upload_error=${encodeURIComponent(code)}`;
+      return sessionRedirect(config, `/artifacts/${params.id}${query}`);
+    }
   });
   app.post("/artifacts/:id/access/:userId", async ({ request, params }: { request: Request; params: Record<string, string> }) => {
     await verifyMutation(request, config);

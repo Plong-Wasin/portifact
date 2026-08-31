@@ -83,7 +83,7 @@ export const artifactVersion = pgTable("artifact_version", {
   byteSize: integer("byte_size").notNull(),
   digest: text("digest").notNull(),
   source: text("source").notNull(),
-  creatorId: text("creator_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  creatorId: text("creator_id").references(() => user.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => ({ artifactOrdinal: uniqueIndex("artifact_version_artifact_ordinal_idx").on(table.artifactId, table.ordinal) }));
 

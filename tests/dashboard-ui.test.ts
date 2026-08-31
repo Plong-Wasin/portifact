@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { ArtifactService } from "../src/artifacts/service";
+import { DomainError } from "../src/artifacts/domain";
 import { config } from "./helpers";
 
 const owner = { id: "owner-1", name: "Person Example", email: "person@example.com", emailVerified: true };
@@ -91,7 +92,49 @@ describe("dashboard artifact UI", () => {
     }
   });
 
-  test("renders a narrow anonymous preview without sharing controls", async () => {
+  test("keeps the selected preview and shows an inline upload error", async () => {
+    const originalViewer = (ArtifactService.prototype as any).getForViewer;
+    const originalVersion = (ArtifactService.prototype as any).viewerVersion;
+    const originalVersions = (ArtifactService.prototype as any).versionsMetaForViewer;
+    const originalSettings = (ArtifactService.prototype as any).shareSettings;
+    const originalPinned = (ArtifactService.prototype as any).isPinned;
+    const originalCreateVersion = (ArtifactService.prototype as any).createVersion;
+    const access = { kind: "owner", canManage: true, canContribute: true, canBrowseVersions: true, canViewSource: true, canDownload: true };
+    (ArtifactService.prototype as any).getForViewer = async () => ({ artifact, access });
+    (ArtifactService.prototype as any).viewerVersion = async (_userId: string | null, _artifactId: string, versionId?: string) => ({ artifact, access, version: versionId === "version-1" ? shared : latest });
+    (ArtifactService.prototype as any).versionsMetaForViewer = async () => versions;
+    (ArtifactService.prototype as any).shareSettings = async () => ({ artifact, access, people: [{ user: owner, role: "owner" }], canManage: true });
+    (ArtifactService.prototype as any).isPinned = async () => false;
+    (ArtifactService.prototype as any).createVersion = async () => { throw new DomainError("VERSION_CONFLICT", "artifact has a newer version", 409); };
+
+    try {
+      const form = new FormData();
+      form.set("file", new File(["<h1>stale</h1>"], "design.html", { type: "text/html" }));
+      form.set("parent_version_id", "version-1");
+      form.set("view_version_id", "version-1");
+      form.set("csrf", "csrf-token");
+      const app = appWithSession();
+      const upload = await app.handle(new Request("http://localhost/artifacts/artifact-1/versions", { method: "POST", headers: { cookie: "portifact_csrf=csrf-token" }, body: form }));
+
+      expect(upload.status).toBe(302);
+      expect(upload.headers.get("location")).toBe("http://localhost/artifacts/artifact-1?version=version-1&upload_error=VERSION_CONFLICT");
+
+      const response = await app.handle(new Request(upload.headers.get("location")!, { headers: requestHeaders() }));
+      const body = await response.text();
+      expect(response.status).toBe(200);
+      expect(body).toContain("newer Version");
+      expect(body).toContain('/artifacts/artifact-1/content?version=version-1');
+    } finally {
+      (ArtifactService.prototype as any).getForViewer = originalViewer;
+      (ArtifactService.prototype as any).viewerVersion = originalVersion;
+      (ArtifactService.prototype as any).versionsMetaForViewer = originalVersions;
+      (ArtifactService.prototype as any).shareSettings = originalSettings;
+      (ArtifactService.prototype as any).isPinned = originalPinned;
+      (ArtifactService.prototype as any).createVersion = originalCreateVersion;
+    }
+  });
+
+  test("renders a narrow anonymous preview with the canonical copy-link control", async () => {
     const originalViewer = (ArtifactService.prototype as any).getForViewer;
     const originalVersion = (ArtifactService.prototype as any).viewerVersion;
     const access = { kind: "general", canManage: false, canContribute: false, canBrowseVersions: false, canViewSource: false, canDownload: false };
@@ -105,7 +148,8 @@ describe("dashboard artifact UI", () => {
       expect(response.status).toBe(200);
       expect(body).toContain('data-access-kind="general"');
       expect(body).toContain("Artifact preview");
-      expect(body).not.toContain('<summary class="share-trigger">');
+      expect(body).toContain('<summary class="share-trigger">Share</summary>');
+      expect(body).toContain("Copy link");
     } finally {
       (ArtifactService.prototype as any).getForViewer = originalViewer;
       (ArtifactService.prototype as any).viewerVersion = originalVersion;
