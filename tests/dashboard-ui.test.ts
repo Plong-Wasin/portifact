@@ -79,6 +79,7 @@ describe("dashboard artifact UI", () => {
       const contentBody = await content.text();
 
       expect(workspace.status).toBe(200);
+      expect(workspace.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
       expect(body).toContain('class="artifact-frame"');
       expect(body).toContain("Version history");
       expect(body).toContain("Copy link");
@@ -99,6 +100,7 @@ describe("dashboard artifact UI", () => {
       expect(document.querySelector(".share-url")).toBeNull();
       expect(document.querySelector("[data-copy-url]")?.textContent).toContain("Copy link");
       expect(content.status).toBe(200);
+      expect(content.headers.get("referrer-policy")).toBe("no-referrer");
       expect(contentBody).toContain("Shared v1");
     } finally {
       (ArtifactService.prototype as any).getForViewer = originalViewer;

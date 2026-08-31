@@ -44,10 +44,21 @@ export function validateName(value: unknown): string {
   return name;
 }
 
-export function artifactHeaders(headers = new Headers()): Headers {
+function artifactPrivacyHeaders(headers: Headers): Headers {
   headers.set("X-Robots-Tag", ARTIFACT_ROBOTS);
-  headers.set("Referrer-Policy", "no-referrer");
   headers.set("Cache-Control", "private, no-store");
+  return headers;
+}
+
+export function artifactHeaders(headers = new Headers()): Headers {
+  artifactPrivacyHeaders(headers);
+  headers.set("Referrer-Policy", "no-referrer");
+  return headers;
+}
+
+export function artifactWorkspaceHeaders(headers = new Headers()): Headers {
+  artifactPrivacyHeaders(headers);
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   return headers;
 }
 

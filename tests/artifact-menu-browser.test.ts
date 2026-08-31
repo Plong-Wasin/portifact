@@ -82,7 +82,64 @@ async function menuResult(width: number, height: number, menu: "title" | "share"
   }
 }
 
+async function renameRequestOrigin(): Promise<{ actual: string | null; expected: string }> {
+  const originalViewer = (ArtifactService.prototype as any).getForViewer;
+  const originalVersion = (ArtifactService.prototype as any).viewerVersion;
+  const originalVersions = (ArtifactService.prototype as any).versionsMetaForViewer;
+  const originalSettings = (ArtifactService.prototype as any).shareSettings;
+  const originalPinned = (ArtifactService.prototype as any).isPinned;
+  const access = { kind: "owner", canManage: true, canContribute: true, canBrowseVersions: true, canViewSource: true, canDownload: true };
+  (ArtifactService.prototype as any).getForViewer = async () => ({ artifact, access });
+  (ArtifactService.prototype as any).viewerVersion = async () => ({ artifact, access, version: latest });
+  (ArtifactService.prototype as any).versionsMetaForViewer = async () => versions;
+  (ArtifactService.prototype as any).shareSettings = async () => ({ artifact, access, people: [{ user: owner, role: "owner" }], canManage: true });
+  (ArtifactService.prototype as any).isPinned = async () => false;
+
+  const app = createApp({} as never, config(), { api: { getSession: async () => ({ user: owner }) } } as never);
+  try {
+    const response = await app.handle(new Request("http://127.0.0.1/artifacts/artifact-1"));
+    const body = await response.text();
+    const nonce = response.headers.get("content-security-policy")?.match(/nonce-([^'; ]+)/)?.[1];
+    if (!nonce) throw new Error("Artifact response did not expose a script nonce");
+    const submitRename = `<script nonce="${nonce}">document.querySelector('form[action="/artifacts/artifact-1/rename"]')?.requestSubmit();</script>`;
+    const instrumented = body.replace("</body>", `${submitRename}</body>`);
+    let actual: string | null = null;
+    const browserServer = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) => {
+        const url = new URL(request.url);
+        if (request.method === "POST" && url.pathname === "/artifacts/artifact-1/rename") {
+          actual = request.headers.get("origin");
+          return new Response("<!doctype html><title>Done</title>", { headers: { "content-type": "text/html" } });
+        }
+        if (url.pathname.endsWith("/content")) return new Response("<h1>Preview</h1>", { headers: { "content-type": "text/html" } });
+        return new Response(instrumented, { headers: response.headers });
+      },
+    });
+    try {
+      const expected = browserServer.url.origin;
+      const browser = Bun.spawn([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--run-all-compositor-stages-before-draw", "--virtual-time-budget=1000", "--dump-dom", `${expected}/artifacts/artifact-1`], { stdout: "ignore", stderr: "ignore" });
+      await browser.exited;
+      return { actual, expected };
+    } finally {
+      browserServer.stop(true);
+    }
+  } finally {
+    (ArtifactService.prototype as any).getForViewer = originalViewer;
+    (ArtifactService.prototype as any).viewerVersion = originalVersion;
+    (ArtifactService.prototype as any).versionsMetaForViewer = originalVersions;
+    (ArtifactService.prototype as any).shareSettings = originalSettings;
+    (ArtifactService.prototype as any).isPinned = originalPinned;
+  }
+}
+
 describe.skipIf(!existsSync(chrome))("Artifact workspace browser layout", () => {
+  test.serial("submits Rename with the workspace origin", async () => {
+    const origin = await renameRequestOrigin();
+    expect(origin.actual).toBe(origin.expected);
+  }, { timeout: 15000 });
+
   test.serial("keeps the title on the left and title menus above the Preview at desktop and mobile sizes", async () => {
     const desktop = await menuResult(1024, 768, "title");
     const mobile = await menuResult(390, 844, "title");

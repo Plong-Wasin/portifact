@@ -3,7 +3,7 @@ import type { Auth } from "../auth";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { ArtifactService, type ArtifactListItem, type ArtifactViewer, type PeopleWithAccess } from "../artifacts/service";
-import { artifactHeaders, ARTIFACT_CSP, DomainError, escapeHtml, robotsMeta } from "../artifacts/domain";
+import { artifactHeaders, artifactWorkspaceHeaders, ARTIFACT_CSP, DomainError, escapeHtml, robotsMeta } from "../artifacts/domain";
 import { contentMimeType, decodeContent, formatExtension, formatFromFilename, type ArtifactFormat } from "../artifacts/content";
 import { renderPreview } from "../artifacts/renderer";
 
@@ -433,7 +433,7 @@ export function registerDashboardRoutes(app: any, db: Database, config: Config, 
   const page = (body: string, status = 200, headers = new Headers(), headerContent = "") => html(body, status, headers, headerContent, config.appUrl.origin);
   const artifactPage = (body: string, headerContent: string, status = 200) => {
     const response = page(body, status, new Headers(), headerContent);
-    artifactHeaders(response.headers);
+    artifactWorkspaceHeaders(response.headers);
     return response;
   };
   app.get("/", async ({ request }: { request: Request }) => sessionRedirect(config, (await sessionUser(auth, request)) ? "/artifacts" : "/login"));
